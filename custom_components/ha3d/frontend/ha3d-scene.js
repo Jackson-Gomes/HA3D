@@ -16,18 +16,36 @@ function ensureSceneState(panel) {
   panel._globalLightPct = readGlobalLight();
 }
 
-if (!proto.__ha3dSceneLightTunedV2) {
-  proto.__ha3dSceneLightTunedV2 = true;
+function installAndApplySceneControls(panel) {
+  ensureSceneState(panel);
+  panel._installGlobalLightControl?.();
+  panel._applyGlobalLight?.(panel._globalLightPct, false);
+}
+
+if (!proto.__ha3dSceneLightTunedV3) {
+  proto.__ha3dSceneLightTunedV3 = true;
 
   const originalConnectedCallback = proto.connectedCallback;
   proto.connectedCallback = function () {
     ensureSceneState(this);
     originalConnectedCallback.call(this);
-    queueMicrotask(() => {
-      this._installGlobalLightControl?.();
-      this._applyGlobalLight?.(this._globalLightPct, false);
-    });
+    queueMicrotask(() => installAndApplySceneControls(this));
   };
+
+  // The HA panel element can already be connected by the time this optional
+  // module finishes loading. Re-run the UI install on the next hass update too.
+  const hassDescriptor = Object.getOwnPropertyDescriptor(proto, "hass");
+  if (hassDescriptor?.set) {
+    Object.defineProperty(proto, "hass", {
+      configurable: true,
+      enumerable: hassDescriptor.enumerable,
+      get: hassDescriptor.get,
+      set(value) {
+        hassDescriptor.set.call(this, value);
+        queueMicrotask(() => installAndApplySceneControls(this));
+      },
+    });
+  }
 
   const originalInitViewer = proto._initViewer;
   proto._initViewer = function (...args) {
@@ -97,7 +115,8 @@ if (!proto.__ha3dSceneLightTunedV2) {
 
     const style = document.createElement("style");
     style.textContent = `
-      #globalLightSection{margin:10px 0 0;padding:11px 1px 2px;border-top:1px solid rgba(255,255,255,.11)}
+      #viewsPanel{max-height:calc(100vh - 92px);overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
+      #globalLightSection{margin:9px 0 11px;padding:10px 1px 11px;border-top:1px solid rgba(255,255,255,.11);border-bottom:1px solid rgba(255,255,255,.11)}
       .globalLightHeader{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px}
       .globalLightTitle{font-size:13px;font-weight:700}.globalLightValue{font-size:12px;opacity:.72;white-space:nowrap}
       .globalLightSlider{width:100%;accent-color:var(--primary-color,#03a9f4)}
@@ -113,14 +132,15 @@ if (!proto.__ha3dSceneLightTunedV2) {
         <span id="globalLightValue" class="globalLightValue">${this._globalLightPct}%</span>
       </div>
       <input id="globalLightSlider" class="globalLightSlider" type="range" min="0" max="100" step="5" value="${this._globalLightPct}">
-      <div class="globalLightHint">Ajusta apenas a iluminação ambiente do viewer. Não altera as luzes reais do Home Assistant.</div>
+      <div class="globalLightHint">Ajusta só a iluminação ambiente do viewer. Não altera as luzes reais do Home Assistant.</div>
     `;
 
-    const graphics = viewsPanel.querySelector("#graphicsSection");
-    const saveButton = viewsPanel.querySelector("#saveViewButton");
-    if (graphics?.nextSibling) viewsPanel.insertBefore(section, graphics.nextSibling);
-    else if (saveButton) viewsPanel.insertBefore(section, saveButton);
-    else viewsPanel.appendChild(section);
+    // Keep it high in the menu so it is immediately visible on phones.
+    const cinematic = viewsPanel.querySelector("#cinematicSection");
+    const viewGrid = viewsPanel.querySelector(".viewGrid");
+    if (cinematic?.nextSibling) viewsPanel.insertBefore(section, cinematic.nextSibling);
+    else if (viewGrid) viewsPanel.insertBefore(section, viewGrid);
+    else viewsPanel.prepend(section);
 
     section.querySelector("#globalLightSlider")?.addEventListener("input", (event) => {
       this._applyGlobalLight?.(Number(event.target.value), true);
