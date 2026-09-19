@@ -1,5 +1,5 @@
 import * as THREE from "https://esm.sh/three@0.180.0";
-import "./ha3d-panel.js?v=0.1.5";
+import "./ha3d-panel.js?v=0.1.7";
 
 const CINEMATIC_KEY = "ha3d_cinematic_enabled_v1";
 const Panel = customElements.get("ha3d-panel");
