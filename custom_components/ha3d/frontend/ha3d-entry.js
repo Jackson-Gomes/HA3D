@@ -1,4 +1,4 @@
-import "./ha3d-cinematic.js?v=0.1.5";
+import "./ha3d-ui.js?v=0.1.6";
 
 // Entry module for the HA3D panel. Keeping this file as the registered
 // Home Assistant module gives us a stable cache-busting point while the
