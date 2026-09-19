@@ -1,5 +1,5 @@
 import * as THREE from "https://esm.sh/three@0.180.0";
-import "./ha3d-ui.js?v=0.1.7";
+import "./ha3d-ui.js";
 
 const GRAPHICS_QUALITY_KEY = "ha3d_texture_quality_pct_v1";
 const Panel = customElements.get("ha3d-panel");
@@ -72,7 +72,6 @@ if (!proto.__ha3dGraphicsPatchedV2) {
     ensureGraphicsState(this);
     if (!this.shadowRoot || this.shadowRoot.querySelector("#graphicsSection")) return;
 
-    // Remove the old top-bar button if a cached 0.1.7 shell created it.
     this.shadowRoot.querySelector("#graphicsButton")?.remove();
     this.shadowRoot.querySelector("#graphicsPanel")?.remove();
 
