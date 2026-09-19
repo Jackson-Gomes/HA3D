@@ -1,5 +1,5 @@
 // Stable HA3D frontend entrypoint.
-// The static path is served with cache headers disabled, so a page/app reload
-// is enough to pick up frontend-only changes without restarting Home Assistant.
-import "./ha3d-graphics.js";
-import "./ha3d-scene.js";
+// Frontend-only changes can be picked up with Redownload + app/page reload;
+// changing dependency query tokens does not require re-registering the HA panel.
+import "./ha3d-graphics.js?v=frontend-2";
+import "./ha3d-scene.js?v=frontend-2";
