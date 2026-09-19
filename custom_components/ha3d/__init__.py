@@ -52,7 +52,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             webcomponent_name=PANEL_ELEMENT,
             sidebar_title=PANEL_TITLE,
             sidebar_icon=PANEL_ICON,
-            module_url=f"{STATIC_URL}/ha3d-entry.js?v=0.1.8",
+            module_url=f"{STATIC_URL}/ha3d-entry.js",
             embed_iframe=False,
             require_admin=False,
             handle_safe_area=True,
