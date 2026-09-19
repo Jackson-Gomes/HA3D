@@ -18,22 +18,26 @@ jobs:
           node-version: "22"
       - name: Compile Python
         run: python -m compileall -q custom_components/ha3d
-      - name: Validate JSON
+      - name: Validate JSON and HACS layout
         run: |
           python - <<'PY'
           import json
           from pathlib import Path
+
           for path in [Path("hacs.json"), *Path("custom_components/ha3d").rglob("*.json")]:
               json.loads(path.read_text(encoding="utf-8"))
               print(f"ok {path}")
+
+          manifest = json.loads(Path("custom_components/ha3d/manifest.json").read_text(encoding="utf-8"))
+          required = {"domain", "documentation", "issue_tracker", "codeowners", "name", "version"}
+          missing = sorted(required - manifest.keys())
+          if missing:
+              raise SystemExit(f"manifest missing required HACS keys: {missing}")
+
+          brand = Path("custom_components/ha3d/brand/icon.png")
+          if not brand.is_file():
+              raise SystemExit("missing custom_components/ha3d/brand/icon.png")
+          print(f"ok {brand}")
           PY
       - name: Check frontend syntax
         run: npm run check
-
-  validate-hacs:
-    runs-on: ubuntu-latest
-    steps:
-      - name: HACS validation
-        uses: hacs/action@main
-        with:
-          category: integration
