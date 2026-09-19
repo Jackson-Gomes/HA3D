@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import time
 from typing import Any
 
 from homeassistant.core import HomeAssistant
@@ -10,6 +11,7 @@ from .const import MODEL_PUBLIC_URL, STORE_KEY, STORE_VERSION
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "model_url": None,
+    "model_revision": 0,
     "auto_bind": True,
     "bindings": {},
 }
@@ -38,4 +40,9 @@ class HA3DStore:
         return deepcopy(data)
 
     async def async_set_model_ready(self) -> dict[str, Any]:
-        return await self.async_update({"model_url": MODEL_PUBLIC_URL})
+        return await self.async_update(
+            {
+                "model_url": MODEL_PUBLIC_URL,
+                "model_revision": time.time_ns(),
+            }
+        )
