@@ -1,4 +1,4 @@
-import "./ha3d-graphics.js?v=0.1.7";
+import "./ha3d-graphics.js?v=0.1.8";
 
 // Entry module for the HA3D panel. Keeping this file as the registered
 // Home Assistant module gives us a stable cache-busting point while the
