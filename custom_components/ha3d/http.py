@@ -110,6 +110,7 @@ class HA3DModelUploadView(HomeAssistantView):
 
         total = 0
         header = bytearray()
+        too_large = False
         handle = await self._hass.async_add_executor_job(open, temporary, "wb")
         try:
             while True:
@@ -118,15 +119,20 @@ class HA3DModelUploadView(HomeAssistantView):
                     break
                 total += len(chunk)
                 if total > MAX_MODEL_BYTES:
-                    return self.json(
-                        {"error": "model_too_large", "max_bytes": MAX_MODEL_BYTES},
-                        status=413,
-                    )
+                    too_large = True
+                    break
                 if len(header) < 4:
                     header.extend(chunk[: 4 - len(header)])
                 await self._hass.async_add_executor_job(handle.write, chunk)
         finally:
             await self._hass.async_add_executor_job(handle.close)
+
+        if too_large:
+            await self._hass.async_add_executor_job(temporary.unlink, True)
+            return self.json(
+                {"error": "model_too_large", "max_bytes": MAX_MODEL_BYTES},
+                status=413,
+            )
 
         if bytes(header) != b"glTF":
             await self._hass.async_add_executor_job(temporary.unlink, True)
