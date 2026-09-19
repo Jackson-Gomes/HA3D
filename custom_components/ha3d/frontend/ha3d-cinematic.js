@@ -1,4 +1,5 @@
-import "./ha3d-panel.js";
+import * as THREE from "https://esm.sh/three@0.180.0";
+import "./ha3d-panel.js?v=0.1.5";
 
 const CINEMATIC_KEY = "ha3d_cinematic_enabled_v1";
 const Panel = customElements.get("ha3d-panel");
@@ -6,6 +7,11 @@ const Panel = customElements.get("ha3d-panel");
 if (!Panel) throw new Error("HA3D panel base module was not registered");
 
 const proto = Panel.prototype;
+
+function cinematicEase(t) {
+  const x = Math.max(0, Math.min(1, t));
+  return x * x * x * (x * (x * 6 - 15) + 10);
+}
 
 function ensureCinematicState(panel) {
   if (panel._ha3dCinematicReady) return;
@@ -77,6 +83,7 @@ if (!proto.__ha3dCinematicPatched) {
       .cinematicSlider:before{content:"";position:absolute;width:21px;height:21px;left:3px;top:3px;border-radius:50%;background:#ddd;transition:.18s}
       .cinematicSwitch input:checked+.cinematicSlider{background:var(--primary-color,#03a9f4)}
       .cinematicSwitch input:checked+.cinematicSlider:before{transform:translateX(19px);background:#fff}
+      .cinematicTest{width:100%;margin-top:9px;background:#24262c;font-size:12px;min-height:36px;padding:7px 8px}
       #topbar,#viewsPanel,#meta{transition:opacity .22s ease}
       #root.ha3d-cinematic-active #topbar,#root.ha3d-cinematic-active #viewsPanel,#root.ha3d-cinematic-active #meta{opacity:0!important;pointer-events:none!important}
     `;
@@ -93,6 +100,7 @@ if (!proto.__ha3dCinematicPatched) {
         </label>
       </div>
       <div class="cinematicHint">Foca automaticamente a câmera quando uma luz muda de estado.</div>
+      <button id="cinematicTest" class="cinematicTest" type="button">Testar animação</button>
     `;
 
     const panel = this.shadowRoot.querySelector("#viewsPanel");
@@ -110,6 +118,11 @@ if (!proto.__ha3dCinematicPatched) {
         this._cinematicPending.clear();
         this._cinematicQueue.length = 0;
       }
+    });
+
+    section.querySelector("#cinematicTest").addEventListener("click", () => {
+      const first = this._lightBindings?.keys?.().next?.().value;
+      if (first) this._enqueueCinematicBatch([first]);
     });
   };
 
@@ -259,12 +272,12 @@ if (!proto.__ha3dCinematicPatched) {
 
       if (elapsed < orbitEndMs) {
         const approachT = Math.min(1, elapsed / approachMs);
-        const approachEased = ease(approachT);
+        const approachEased = cinematicEase(approachT);
         const orbitT = Math.max(
           0,
           Math.min(1, (elapsed - orbitStartMs) / (orbitEndMs - orbitStartMs)),
         );
-        const angle = orbitAngle * ease(orbitT);
+        const angle = orbitAngle * cinematicEase(orbitT);
         const currentDir = dir.clone().applyAxisAngle(worldUp, angle);
         const distance = THREE.MathUtils.lerp(startDist, nearDist, approachEased);
 
@@ -277,7 +290,7 @@ if (!proto.__ha3dCinematicPatched) {
         this._camera.position.copy(nearB);
         this._controls.target.copy(focus);
       } else if (elapsed < total) {
-        const returnT = ease((elapsed - orbitEndMs - holdMs) / returnMs);
+        const returnT = cinematicEase((elapsed - orbitEndMs - holdMs) / returnMs);
         this._camera.position.lerpVectors(nearB, startPos, returnT);
         this._controls.target.lerpVectors(focus, startTarget, returnT);
       } else {
