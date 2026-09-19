@@ -3,8 +3,10 @@ import { OrbitControls } from "https://esm.sh/three@0.180.0/examples/jsm/control
 import { GLTFLoader } from "https://esm.sh/three@0.180.0/examples/jsm/loaders/GLTFLoader.js";
 
 const TOGGLE_DOMAINS = new Set(["light", "switch", "input_boolean", "fan"]);
-const INITIAL_TEXTURES = 40;
 const LIGHT_INTENSITY_SCALE = 0.40;
+
+// Compatibility fallback for the original APT0307 GLB.
+// Generic models should prefer exact entity_id node names or explicit bindings.
 const LEGACY_LIGHTS = [
   { entity: "light.luz_da_sala", match: ["sala"], name: "Luz da Sala" },
   { entity: "light.luz_do_corredor", match: ["corredor"], name: "Luz do corredor" },
@@ -36,8 +38,7 @@ class HA3DPanel extends HTMLElement {
     this._boundCount = 0;
     this._objectsByEntity = new Map();
     this._lightBindings = new Map();
-    this._textureGroups = [];
-    this._currentTextureCount = 0;
+    this._modelLights = [];
     this._raycaster = new THREE.Raycaster();
     this._pointer = new THREE.Vector2();
     this._resizeObserver = null;
@@ -82,10 +83,7 @@ class HA3DPanel extends HTMLElement {
   _renderShell() {
     this.shadowRoot.innerHTML = `
       <style>
-        :host {
-          display:block;width:100%;height:100%;min-height:100vh;background:#111;color:var(--primary-text-color,#fff);
-          font-family:var(--paper-font-body1_-_font-family,system-ui,sans-serif);overflow:hidden;
-        }
+        :host{display:block;width:100%;height:100%;min-height:100vh;background:#111;color:var(--primary-text-color,#fff);font-family:var(--paper-font-body1_-_font-family,system-ui,sans-serif);overflow:hidden}
         *{box-sizing:border-box}#root{position:relative;width:100%;height:100vh;overflow:hidden}#stage{position:absolute;inset:0}
         canvas{display:block;width:100%;height:100%;touch-action:none}
         #topbar{position:absolute;top:max(12px,env(safe-area-inset-top));left:max(12px,env(safe-area-inset-left));right:max(12px,env(safe-area-inset-right));display:flex;align-items:center;gap:10px;z-index:20;pointer-events:none}
@@ -125,6 +123,8 @@ class HA3DPanel extends HTMLElement {
     const stage = this.shadowRoot.querySelector("#stage");
     this._scene = new THREE.Scene();
     this._scene.background = new THREE.Color(0x111111);
+
+    // Same visual baseline used by the original working viewer.
     this._camera = new THREE.PerspectiveCamera(45, 1, 0.01, 100000);
     this._camera.position.set(7, 7, 7);
 
@@ -140,7 +140,6 @@ class HA3DPanel extends HTMLElement {
     this._controls = new OrbitControls(this._camera, this._renderer.domElement);
     this._controls.enableDamping = true;
     this._controls.dampingFactor = 0.08;
-    this._controls.addEventListener("end", () => this._applyTextureBudget());
 
     const ambient = new THREE.HemisphereLight(0xfff4e6, 0x556070, 0.55);
     ambient.castShadow = false;
@@ -150,6 +149,7 @@ class HA3DPanel extends HTMLElement {
     this._resizeObserver = new ResizeObserver(() => this._resize());
     this._resizeObserver.observe(stage);
     this._resize();
+
     this._renderer.setAnimationLoop(() => {
       this._controls.update();
       this._updateLightMarkers();
@@ -174,7 +174,9 @@ class HA3DPanel extends HTMLElement {
   }
 
   async _waitForHassAndLoad() {
-    for (let i = 0; i < 100 && !this._hass; i += 1) await new Promise((resolve) => setTimeout(resolve, 50));
+    for (let i = 0; i < 100 && !this._hass; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
     if (!this._hass) {
       this._setStatus("Home Assistant indisponível");
       return;
@@ -204,10 +206,12 @@ class HA3DPanel extends HTMLElement {
       this._setStatus("Selecione um arquivo .glb");
       return;
     }
+
     const form = new FormData();
     form.append("file", file, file.name);
     this._setStatus(`Enviando ${file.name}…`);
     this._setUploadEnabled(false);
+
     try {
       const response = await this._hass.fetchWithAuth("/api/ha3d/model", { method: "POST", body: form });
       const result = await response.json();
@@ -225,90 +229,31 @@ class HA3DPanel extends HTMLElement {
   async _loadModel(url) {
     this._setStatus("Carregando modelo 3D…");
     const gltf = await this._loader.loadAsync(url);
+
     if (this._model) this._scene.remove(this._model);
     this._clearMarkers();
+
     this._model = gltf.scene;
-    this._collectBaseTextures(this._model);
     this._collectModelLights(this._model);
     this._scene.add(this._model);
+
+    // Keep every material/texture exactly as exported by the GLB.
+    // No 40-texture budget unless a future device-specific fallback is needed.
     this._model.traverse((object) => {
       if (object.isMesh) {
         object.castShadow = true;
         object.receiveShadow = true;
       }
     });
+
     this._indexBindings();
     this._fit(this._model);
-    this._currentTextureCount = Math.min(INITIAL_TEXTURES, this._textureGroups.length);
-    this._applyTextureBudget();
     this._bindModelLights();
+    this._bindEntityLightMarkers();
     this._syncLightStates();
+
     this._showEmpty(false);
-    this._setStatus(`Pronto · ${this._boundCount} vínculos`);
-  }
-
-  _collectBaseTextures(object) {
-    this._textureGroups = [];
-    const groups = new Map();
-    const seenMaterial = new Set();
-    object.traverse((mesh) => {
-      if (!mesh.isMesh) return;
-      for (const material of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
-        if (!material || seenMaterial.has(material.uuid)) continue;
-        seenMaterial.add(material.uuid);
-        if (material.aoMap) material.aoMap = null;
-        if (material.normalMap) material.normalMap = null;
-        if (material.roughnessMap) material.roughnessMap = null;
-        if (material.metalnessMap) material.metalnessMap = null;
-        const texture = material.map;
-        if (!texture) {
-          material.needsUpdate = true;
-          continue;
-        }
-        const key = texture.source?.uuid || texture.image?.src || texture.uuid;
-        if (!groups.has(key)) groups.set(key, { slots: [] });
-        groups.get(key).slots.push({ material, texture, mesh });
-      }
-    });
-    this._textureGroups = [...groups.values()];
-  }
-
-  _applyTextureBudget() {
-    if (!this._textureGroups.length || !this._camera) return;
-    const count = Math.max(0, Math.min(this._textureGroups.length, this._currentTextureCount));
-    const p = new THREE.Vector3();
-    const box = new THREE.Box3();
-    const size = new THREE.Vector3();
-    const ranked = this._textureGroups.map((group, index) => {
-      let bestDistance = Infinity;
-      let maxSize = 0;
-      for (const slot of group.slots) {
-        slot.mesh.getWorldPosition(p);
-        bestDistance = Math.min(bestDistance, this._camera.position.distanceToSquared(p));
-        box.setFromObject(slot.mesh);
-        box.getSize(size);
-        maxSize = Math.max(maxSize, size.length());
-      }
-      const sizePenalty = 1 / Math.max(maxSize, 0.08);
-      return { group, index, score: bestDistance * sizePenalty };
-    });
-    ranked.sort((a, b) => a.score - b.score);
-    const enabled = new Set(ranked.slice(0, count).map((item) => item.group));
-    for (const group of this._textureGroups) {
-      const active = enabled.has(group);
-      for (const { material, texture } of group.slots) {
-        if (active) {
-          if (material.map !== texture) {
-            material.map = texture;
-            texture.needsUpdate = true;
-            material.needsUpdate = true;
-          }
-        } else if (material.map) {
-          material.map = null;
-          material.needsUpdate = true;
-        }
-      }
-    }
+    this._setStatus(`Pronto · ${this._boundCount} vínculos · ${this._modelLights.length} luzes 3D`);
   }
 
   _collectModelLights(object) {
@@ -328,13 +273,16 @@ class HA3DPanel extends HTMLElement {
   _indexBindings() {
     this._objectsByEntity.clear();
     this._boundCount = 0;
+
     const explicit = this._config?.bindings || {};
     const autoBind = this._config?.auto_bind !== false;
     const states = this._hass?.states || {};
+
     this._model?.traverse((object) => {
       if (!object.name) return;
       const entityId = explicit[object.name] || (autoBind && states[object.name] ? object.name : null);
       if (!entityId || !states[entityId]) return;
+
       object.userData.ha3dEntityId = entityId;
       if (!this._objectsByEntity.has(entityId)) {
         this._objectsByEntity.set(entityId, []);
@@ -344,12 +292,32 @@ class HA3DPanel extends HTMLElement {
     });
   }
 
-  _mappingForLight(light) {
+  _directLightMapping(light) {
     const states = this._hass?.states || {};
     const explicit = this._config?.bindings || {};
-    const direct = explicit[light.name] || (states[light.name]?.entity_id?.startsWith("light.") ? light.name : null);
-    if (direct && states[direct]) return { entity: direct, name: states[direct].attributes?.friendly_name || direct };
+
+    let node = light;
+    while (node && node !== this._model?.parent) {
+      const name = node.name;
+      if (name) {
+        const entityId = explicit[name] || (states[name]?.entity_id?.startsWith("light.") ? name : null);
+        if (entityId && states[entityId]?.entity_id?.startsWith("light.")) {
+          return { entity: entityId, name: states[entityId].attributes?.friendly_name || entityId };
+        }
+      }
+      if (node === this._model) break;
+      node = node.parent;
+    }
+    return null;
+  }
+
+  _mappingForLight(light) {
+    const direct = this._directLightMapping(light);
+    if (direct) return direct;
+
+    const states = this._hass?.states || {};
     const name = normalizeName(light.name);
+
     for (const map of LEGACY_LIGHTS) {
       const matches = map.match.some((token) => name.includes(normalizeName(token)));
       const excluded = (map.exclude || []).some((token) => name.includes(normalizeName(token)));
@@ -358,59 +326,95 @@ class HA3DPanel extends HTMLElement {
     return null;
   }
 
+  _makeLightMarker(entity, name, anchor, light = null) {
+    if (this._lightBindings.has(entity)) return;
+
+    const marker = document.createElement("button");
+    marker.type = "button";
+    marker.className = "lightMarker";
+    marker.textContent = "💡";
+    marker.title = name;
+    marker.addEventListener("click", (event) => {
+      event.stopPropagation();
+      this._selectEntity(entity);
+    });
+
+    this.shadowRoot.querySelector("#markers").appendChild(marker);
+    this._lightBindings.set(entity, { entity, name, anchor, light, marker });
+  }
+
   _bindModelLights() {
-    this._lightBindings.clear();
-    const markers = this.shadowRoot.querySelector("#markers");
     const counted = new Set(this._objectsByEntity.keys());
-    for (const light of this._modelLights || []) {
+
+    for (const light of this._modelLights) {
       const map = this._mappingForLight(light);
       if (!map || this._lightBindings.has(map.entity)) continue;
-      const marker = document.createElement("button");
-      marker.type = "button";
-      marker.className = "lightMarker";
-      marker.textContent = "💡";
-      marker.title = map.name;
-      marker.addEventListener("click", (event) => {
-        event.stopPropagation();
-        this._selectEntity(map.entity);
-      });
-      markers.appendChild(marker);
-      this._lightBindings.set(map.entity, { entity: map.entity, name: map.name, light, marker });
+
+      this._makeLightMarker(map.entity, map.name, light, light);
+
       if (!counted.has(map.entity)) {
         counted.add(map.entity);
         this._boundCount += 1;
       }
     }
+  }
+
+  _bindEntityLightMarkers() {
+    const states = this._hass?.states || {};
+
+    for (const [entity, objects] of this._objectsByEntity.entries()) {
+      if (!entity.startsWith("light.") || this._lightBindings.has(entity) || !objects.length) continue;
+      const name = states[entity]?.attributes?.friendly_name || entity;
+      this._makeLightMarker(entity, name, objects[0], null);
+    }
+
     this.shadowRoot.querySelector("#meta").textContent = `${this._boundCount} vínculos`;
   }
 
   _syncLightStates() {
     if (!this._hass || !this._lightBindings.size) return;
+
     for (const binding of this._lightBindings.values()) {
       const state = this._hass.states?.[binding.entity];
       if (!state) continue;
+
       const attrs = state.attributes || {};
       const unavailable = state.state === "unavailable" || state.state === "unknown";
       const on = state.state === "on";
       const brightness = Number.isFinite(Number(attrs.brightness)) ? Number(attrs.brightness) : 255;
-      const base = binding.light.userData.ha3dBaseIntensity || 1;
-      binding.light.intensity = on ? base * Math.max(0.05, brightness / 255) : 0;
-      const rgb = attrs.rgb_color;
-      const hs = attrs.hs_color;
-      if (Array.isArray(rgb) && rgb.length >= 3) binding.light.color.setRGB(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255, THREE.SRGBColorSpace);
-      else if (Array.isArray(hs) && hs.length >= 2) binding.light.color.setHSL((((Number(hs[0]) % 360) + 360) % 360) / 360, Math.max(0, Math.min(100, Number(hs[1]))) / 100, 0.5);
-      else binding.light.color.copy(binding.light.userData.ha3dOriginalColor || new THREE.Color(0xffffff));
-      binding.light.castShadow = on;
-      if (binding.light.shadow) {
-        binding.light.shadow.mapSize.set(512, 512);
-        binding.light.shadow.bias = -0.0005;
-        binding.light.shadow.normalBias = 0.05;
-        if (binding.light.distance > 0 && binding.light.shadow.camera) {
-          binding.light.shadow.camera.near = Math.max(0.05, Math.min(1, binding.light.distance * 0.02));
-          binding.light.shadow.camera.far = binding.light.distance;
-          binding.light.shadow.camera.updateProjectionMatrix();
+
+      if (binding.light) {
+        const base = binding.light.userData.ha3dBaseIntensity || 1;
+        binding.light.intensity = on ? base * Math.max(0.05, brightness / 255) : 0;
+
+        const rgb = attrs.rgb_color;
+        const hs = attrs.hs_color;
+        if (Array.isArray(rgb) && rgb.length >= 3) {
+          binding.light.color.setRGB(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255, THREE.SRGBColorSpace);
+        } else if (Array.isArray(hs) && hs.length >= 2) {
+          binding.light.color.setHSL(
+            (((Number(hs[0]) % 360) + 360) % 360) / 360,
+            Math.max(0, Math.min(100, Number(hs[1]))) / 100,
+            0.5,
+          );
+        } else {
+          binding.light.color.copy(binding.light.userData.ha3dOriginalColor || new THREE.Color(0xffffff));
+        }
+
+        binding.light.castShadow = on && !unavailable;
+        if (binding.light.castShadow && binding.light.shadow) {
+          binding.light.shadow.mapSize.set(512, 512);
+          binding.light.shadow.bias = -0.0005;
+          binding.light.shadow.normalBias = 0.05;
+
+          if (binding.light.distance > 0 && binding.light.shadow.camera) {
+            binding.light.shadow.camera.near = Math.max(0.05, Math.min(1, binding.light.distance * 0.02));
+            binding.light.shadow.camera.far = binding.light.distance;
+            binding.light.shadow.camera.updateProjectionMatrix();
+          }
         }
       }
+
       binding.marker.classList.toggle("on", on && !unavailable);
       binding.marker.classList.toggle("unavailable", unavailable);
       binding.marker.title = unavailable ? `${binding.name} — indisponível` : binding.name;
@@ -419,14 +423,23 @@ class HA3DPanel extends HTMLElement {
 
   _updateLightMarkers() {
     if (!this._lightBindings.size || !this._camera) return;
+
     const stage = this.shadowRoot.querySelector("#stage");
     const point = new THREE.Vector3();
+
     for (const binding of this._lightBindings.values()) {
-      binding.light.getWorldPosition(point);
+      binding.anchor.getWorldPosition(point);
       point.project(this._camera);
-      const visible = point.z > -1 && point.z < 1 && Math.abs(point.x) <= 1.15 && Math.abs(point.y) <= 1.15;
+
+      const visible =
+        point.z > -1 &&
+        point.z < 1 &&
+        Math.abs(point.x) <= 1.15 &&
+        Math.abs(point.y) <= 1.15;
+
       binding.marker.style.visibility = visible ? "visible" : "hidden";
       if (!visible) continue;
+
       binding.marker.style.left = `${(point.x * 0.5 + 0.5) * stage.clientWidth}px`;
       binding.marker.style.top = `${(-point.y * 0.5 + 0.5) * stage.clientHeight}px`;
     }
@@ -440,8 +453,13 @@ class HA3DPanel extends HTMLElement {
 
   _pick(event) {
     if (!this._model) return;
+
     const rect = this._renderer.domElement.getBoundingClientRect();
-    this._pointer.set(((event.clientX - rect.left) / rect.width) * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1);
+    this._pointer.set(
+      ((event.clientX - rect.left) / rect.width) * 2 - 1,
+      -((event.clientY - rect.top) / rect.height) * 2 + 1,
+    );
+
     this._raycaster.setFromCamera(this._pointer, this._camera);
     const hit = this._raycaster.intersectObject(this._model, true)[0]?.object;
     let node = hit;
@@ -456,22 +474,29 @@ class HA3DPanel extends HTMLElement {
 
   _updateSelectionUi() {
     if (!this.shadowRoot) return;
+
     const panel = this.shadowRoot.querySelector("#selection");
     const stateObj = this._selectedEntity ? this._hass?.states?.[this._selectedEntity] : null;
+
     if (!stateObj) {
       panel?.classList.remove("visible");
       return;
     }
+
     const friendly = stateObj.attributes?.friendly_name || stateObj.entity_id;
     this.shadowRoot.querySelector("#entityName").textContent = friendly;
     this.shadowRoot.querySelector("#entityState").textContent = `${stateObj.entity_id} · ${stateObj.state}`;
+
     const domain = stateObj.entity_id.split(".", 1)[0];
-    this.shadowRoot.querySelector("#toggleButton").style.display = TOGGLE_DOMAINS.has(domain) ? "inline-block" : "none";
+    this.shadowRoot.querySelector("#toggleButton").style.display =
+      TOGGLE_DOMAINS.has(domain) ? "inline-block" : "none";
+
     panel.classList.add("visible");
   }
 
   async _toggleSelected() {
     if (!this._selectedEntity || !this._hass) return;
+
     try {
       await this._hass.callService("homeassistant", "toggle", { entity_id: this._selectedEntity });
     } catch (error) {
@@ -485,6 +510,7 @@ class HA3DPanel extends HTMLElement {
     const center = box.getCenter(new THREE.Vector3());
     const size = box.getSize(new THREE.Vector3());
     const max = Math.max(size.x, size.y, size.z) || 1;
+
     this._controls.target.copy(center);
     this._camera.near = Math.max(max / 10000, 0.01);
     this._camera.far = max * 50;
@@ -495,9 +521,11 @@ class HA3DPanel extends HTMLElement {
 
   _resize() {
     if (!this._renderer) return;
+
     const stage = this.shadowRoot.querySelector("#stage");
     const width = Math.max(stage.clientWidth, 1);
     const height = Math.max(stage.clientHeight, 1);
+
     this._camera.aspect = width / height;
     this._camera.updateProjectionMatrix();
     this._renderer.setSize(width, height, false);
@@ -505,6 +533,7 @@ class HA3DPanel extends HTMLElement {
 
   _updateAdminUi() {
     if (!this.shadowRoot) return;
+
     const isAdmin = Boolean(this._hass?.user?.is_admin);
     this.shadowRoot.querySelector("#uploadButton").style.display = isAdmin ? "inline-block" : "none";
     this.shadowRoot.querySelector("#emptyUploadButton").style.display = isAdmin ? "inline-block" : "none";
