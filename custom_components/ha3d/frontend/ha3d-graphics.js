@@ -36,8 +36,8 @@ function meshTextureScore(mesh) {
   }
 }
 
-if (!proto.__ha3dGraphicsPatched) {
-  proto.__ha3dGraphicsPatched = true;
+if (!proto.__ha3dGraphicsPatchedV2) {
+  proto.__ha3dGraphicsPatchedV2 = true;
 
   const originalConnectedCallback = proto.connectedCallback;
   proto.connectedCallback = function () {
@@ -45,6 +45,19 @@ if (!proto.__ha3dGraphicsPatched) {
     originalConnectedCallback.call(this);
     queueMicrotask(() => this._installGraphicsControls?.());
   };
+
+  const hassDescriptor = Object.getOwnPropertyDescriptor(proto, "hass");
+  if (hassDescriptor?.set) {
+    Object.defineProperty(proto, "hass", {
+      configurable: true,
+      enumerable: hassDescriptor.enumerable,
+      get: hassDescriptor.get,
+      set(value) {
+        hassDescriptor.set.call(this, value);
+        queueMicrotask(() => this._installGraphicsControls?.());
+      },
+    });
+  }
 
   const originalLoadModel = proto._loadModel;
   proto._loadModel = async function (...args) {
@@ -57,57 +70,44 @@ if (!proto.__ha3dGraphicsPatched) {
 
   proto._installGraphicsControls = function () {
     ensureGraphicsState(this);
-    if (!this.shadowRoot || this.shadowRoot.querySelector("#graphicsPanel")) return;
+    if (!this.shadowRoot || this.shadowRoot.querySelector("#graphicsSection")) return;
+
+    // Remove the old top-bar button if a cached 0.1.7 shell created it.
+    this.shadowRoot.querySelector("#graphicsButton")?.remove();
+    this.shadowRoot.querySelector("#graphicsPanel")?.remove();
+
+    const viewsPanel = this.shadowRoot.querySelector("#viewsPanel");
+    if (!viewsPanel) return;
 
     const style = document.createElement("style");
     style.textContent = `
-      #graphicsPanel{display:none;position:absolute;top:max(66px,calc(env(safe-area-inset-top) + 58px));right:max(12px,env(safe-area-inset-right));z-index:31;width:min(330px,calc(100vw - 24px));padding:14px;border-radius:16px}
-      #graphicsPanel.open{display:block}.graphicsTitle{font-size:14px;font-weight:700;margin:1px 2px 12px}.graphicsRow{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px}.graphicsLabel{font-size:13px;font-weight:650}.graphicsValue{font-size:12px;opacity:.72;white-space:nowrap}.graphicsSlider{width:100%;accent-color:var(--primary-color,#03a9f4)}.graphicsHint{font-size:11px;opacity:.62;line-height:1.4;margin-top:8px}
-      #root.ha3d-cinematic-active #graphicsPanel{opacity:0!important;pointer-events:none!important}
+      #graphicsSection{margin:10px 0 11px;padding:11px 1px 12px;border-top:1px solid rgba(255,255,255,.11);border-bottom:1px solid rgba(255,255,255,.11)}
+      .graphicsHeader{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px}
+      .graphicsTitle{font-size:13px;font-weight:700}.graphicsValue{font-size:12px;opacity:.72;white-space:nowrap}
+      .graphicsSlider{width:100%;accent-color:var(--primary-color,#03a9f4)}
+      .graphicsHint{font-size:11px;opacity:.62;line-height:1.4;margin-top:7px}
     `;
     this.shadowRoot.appendChild(style);
 
-    const actions = this.shadowRoot.querySelector("#actions");
-    const uploadButton = this.shadowRoot.querySelector("#uploadButton");
-    if (actions && !this.shadowRoot.querySelector("#graphicsButton")) {
-      const button = document.createElement("button");
-      button.id = "graphicsButton";
-      button.className = "secondary";
-      button.type = "button";
-      button.textContent = "Gráficos";
-      actions.insertBefore(button, uploadButton || null);
-    }
-
-    const panel = document.createElement("div");
-    panel.id = "graphicsPanel";
-    panel.className = "glass";
-    panel.innerHTML = `
-      <div class="graphicsTitle">Qualidade gráfica</div>
-      <div class="graphicsRow"><span class="graphicsLabel">Texturas</span><span id="graphicsTextureValue" class="graphicsValue">100%</span></div>
+    const section = document.createElement("div");
+    section.id = "graphicsSection";
+    section.innerHTML = `
+      <div class="graphicsHeader">
+        <span class="graphicsTitle">Qualidade gráfica · Texturas</span>
+        <span id="graphicsTextureValue" class="graphicsValue">${this._graphicsQuality}%</span>
+      </div>
       <input id="graphicsTextureSlider" class="graphicsSlider" type="range" min="0" max="100" step="5" value="${this._graphicsQuality}">
       <div id="graphicsTextureStatus" class="graphicsHint">Aguardando modelo 3D…</div>
-      <div class="graphicsHint">100% mantém todas as texturas base. Reduza para aliviar memória/GPU em celulares, TVs ou navegadores mais limitados.</div>
+      <div class="graphicsHint">100% mantém todas as texturas. Reduza para aliviar memória e GPU em celulares e TVs.</div>
     `;
 
-    const root = this.shadowRoot.querySelector("#root");
-    const viewsPanel = this.shadowRoot.querySelector("#viewsPanel");
-    root?.appendChild(panel);
+    const saveButton = viewsPanel.querySelector("#saveViewButton");
+    if (saveButton) viewsPanel.insertBefore(section, saveButton);
+    else viewsPanel.appendChild(section);
 
-    const button = this.shadowRoot.querySelector("#graphicsButton");
-    const slider = panel.querySelector("#graphicsTextureSlider");
-
-    button?.addEventListener("click", (event) => {
-      event.stopPropagation();
-      viewsPanel?.classList.remove("open");
-      panel.classList.toggle("open");
-    });
-
+    const slider = section.querySelector("#graphicsTextureSlider");
     slider?.addEventListener("input", () => {
       this._applyGraphicsQuality?.(Number(slider.value), true);
-    });
-
-    root?.addEventListener("pointerdown", (event) => {
-      if (!panel.contains(event.target) && event.target?.id !== "graphicsButton") panel.classList.remove("open");
     });
 
     this._updateGraphicsUi?.();
@@ -163,8 +163,9 @@ if (!proto.__ha3dGraphicsPatched) {
     groups.forEach((group, index) => {
       const enabled = index < enabledCount;
       for (const slot of group.slots) {
-        if (slot.material.map !== (enabled ? slot.texture : null)) {
-          slot.material.map = enabled ? slot.texture : null;
+        const desired = enabled ? slot.texture : null;
+        if (slot.material.map !== desired) {
+          slot.material.map = desired;
           slot.material.needsUpdate = true;
         }
       }
