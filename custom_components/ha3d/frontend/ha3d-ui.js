@@ -1,4 +1,4 @@
-import "./ha3d-cinematic.js?v=0.1.7";
+import "./ha3d-cinematic.js";
 
 const Panel = customElements.get("ha3d-panel");
 if (!Panel) throw new Error("HA3D panel was not registered");
