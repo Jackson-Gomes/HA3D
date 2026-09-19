@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>APT 0307 — Luzes + Texturas</title>
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#111;color:#eee;font:14px system-ui,-apple-system,Segoe UI,Arial,sans-serif}
+  #app{height:100dvh;display:block;background:#111}
+  #view{position:relative;width:100%;height:100dvh;min-width:0;min-height:0;background:#111}
+  canvas{display:block;width:100%;height:100%;touch-action:none}
+  #panel{display:none}
+  h1{font-size:18px;margin:0 0 3px}.sub{color:#aaa;font-size:12px;margin:0 0 13px}
+  .section{padding:12px 0;border-top:1px solid #333}.section:first-of-type{border-top:0;padding-top:0}
+  .section-title{font-weight:700;margin-bottom:9px}
+  .buttons{display:flex;gap:8px;flex-wrap:wrap}
+  button{min-height:42px;border:1px solid #484848;background:#262626;color:#eee;border-radius:9px;padding:8px 12px;font-size:14px;cursor:pointer}
+  button:hover{background:#303030} button.active{background:#176eb5;border-color:#5bb3f5;color:#fff}
+  button:disabled{opacity:.45;cursor:default}
+  .status-card{margin-top:10px;padding:11px 12px;background:#111;border:1px solid #3a3a3a;border-radius:10px;line-height:1.45}
+  .status-main{font-weight:700;font-size:15px}.status-sub{color:#aaa;font-size:12px;margin-top:3px}
+  .row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid #2c2c2c}
+  .row:last-child{border-bottom:0}.light-name{min-width:0;overflow-wrap:anywhere}
+  .light-controls{display:flex;align-items:center;gap:8px;flex:0 0 auto}
+  .light-controls input[type="range"]{width:92px}
+  .light-controls input[type="color"]{width:34px;height:30px;border:0;background:transparent;padding:0;cursor:pointer}
+  .light-pct{width:38px;text-align:right;color:#aaa;font-size:11px}
+  .switch{position:relative;width:46px;height:26px;flex:0 0 auto}.switch input{opacity:0;width:0;height:0}
+  .slider{position:absolute;inset:0;background:#444;border-radius:99px;cursor:pointer}
+  .slider:before{content:"";position:absolute;width:20px;height:20px;left:3px;top:3px;background:#ddd;border-radius:50%;transition:.15s}
+  input:checked+.slider{background:#2d7df6} input:checked+.slider:before{transform:translateX(20px);background:#fff}
+  details{margin-top:9px;border:1px solid #333;border-radius:9px;background:#151515}
+  summary{cursor:pointer;padding:10px 11px;font-weight:600;user-select:none}
+  #lights{padding:0 10px 7px}
+  .hint{color:#aaa;font-size:12px;line-height:1.45;margin-top:10px}
+  #loading{position:absolute;left:12px;top:12px;z-index:3;background:#111d;padding:8px 10px;border-radius:8px;pointer-events:none;max-width:calc(100% - 24px)}
+  #lost{display:none;position:absolute;inset:12px auto auto 12px;z-index:4;max-width:min(460px,calc(100% - 24px));background:#141414;border:1px solid #555;border-radius:10px;padding:12px;line-height:1.45}
+  #lost strong{display:block;font-size:16px;margin-bottom:5px}
+  #sceneControls{position:absolute;right:12px;bottom:12px;z-index:5;display:flex;gap:8px;align-items:center;background:#111c;border:1px solid #444;border-radius:14px;padding:8px;backdrop-filter:blur(8px)}
+  #sceneControls button{width:44px;height:44px;min-height:44px;padding:0;border-radius:50%;font-size:21px;line-height:1}
+  #sceneControls button.on{background:#176eb5;border-color:#5bb3f5}
+  #sceneLightPanel{display:none;position:absolute;right:12px;bottom:70px;z-index:5;width:min(320px,calc(100% - 24px));max-height:55dvh;overflow:auto;background:#151515ee;border:1px solid #444;border-radius:14px;padding:10px;backdrop-filter:blur(10px)}
+  #sceneLightPanel.open{display:block}
+  #sceneLightPanel .scene-title{font-weight:700;margin:2px 2px 8px}
+  #sceneLightPanel .scene-light-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 2px;border-top:1px solid #333}
+  #sceneLightPanel .scene-light-name{font-size:13px;overflow-wrap:anywhere}
+  #sceneLightPanel .scene-light-actions{display:flex;gap:6px;align-items:center}
+  #sceneLightPanel input[type="range"]{width:90px}
+  .lightMarker{display:block;position:absolute;z-index:7;width:34px;height:34px;min-height:34px;padding:0;border-radius:50%;transform:translate(-50%,-50%);font-size:18px;background:#202020e8;border:1px solid #666;box-shadow:0 3px 12px #0008;backdrop-filter:blur(6px)}
+  .lightMarker.on{background:#f3c94be8;border-color:#ffe993;color:#111;box-shadow:0 0 14px #ffd84f99}
+  .lightMarker.off{background:#202020e8;color:#bbb}
+  #lightPopup{display:none;position:absolute;z-index:8;width:min(290px,calc(100% - 24px));background:#171717f2;border:1px solid #555;border-radius:14px;padding:13px;box-shadow:0 8px 28px #000a;backdrop-filter:blur(12px)}
+  #lightPopup.open{display:block}
+  #lightPopup .head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
+  #lightPopup .title{font-size:16px;font-weight:700}
+  #lightPopup .state{font-size:12px;color:#aaa;margin-top:2px}
+  #lightPopup .close{width:34px;height:34px;min-height:34px;padding:0;border-radius:50%;font-size:18px}
+  #lightPopup .control-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-top:10px;border-top:1px solid #333}
+  #lightPopup input[type="range"]{width:145px;max-width:48vw}
+  @media(max-width:760px){
+    #app{display:block}
+    #panel{display:none}
+    #view{width:100%;height:100dvh}
+    h1,.sub{display:none}
+    .section{padding:9px 0}.section-title{margin-bottom:7px}
+    button{min-height:44px;font-size:16px;padding:8px 13px}
+    .status-card{margin-top:8px}
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="view">
+    <div id="loading">Carregando Main.glb…</div>
+    <div id="lost"><strong>WEBGL CONTEXT LOST</strong><span>O Safari/GPU interrompeu o contexto. Recarregue a página e use menos texturas.</span></div>
+    <div id="sceneLightPanel"><div class="scene-title">Iluminação</div><div id="sceneLights"></div></div>
+    <div id="lightMarkers"></div>
+    <div id="lightPopup" role="dialog" aria-label="Controle da luz">
+      <div class="head"><div><div class="title" id="lightPopupTitle">Luz</div><div class="state" id="lightPopupState">Conectando…</div></div><button type="button" class="close" id="lightPopupClose" aria-label="Fechar">×</button></div>
+      <div class="control-row"><span>Ligar / desligar</span><button type="button" id="lightPopupToggle">○</button></div>
+      <div class="control-row" id="lightBrightnessRow"><span>Brilho</span><input id="lightBrightness" type="range" min="1" max="255" value="255"></div>
+    </div>
+    <div id="sceneControls">
+      <button type="button" id="sceneLightsButton" title="Luzes">💡</button>
+      <button type="button" id="sceneShadowsButton" class="on" title="Sombras por parede">◐</button>
+      <button type="button" id="sceneHomeButton" title="Enquadrar">⌂</button>
+    </div>
+  </div>
+
+  <aside id="panel">
+    <h1>APT 0307 — Digital Twin</h1>
+    <p class="sub">Texturas reguláveis + iluminação dinâmica local</p>
+
+    <div class="section">
+      <div class="section-title">Texturas base</div>
+      <div class="buttons" id="textureButtons">
+        <button type="button" data-count="0">0</button>
+        <button type="button" data-count="1">1</button>
+        <button type="button" data-count="5">5</button>
+        <button type="button" data-count="10">10</button>
+        <button type="button" data-count="20">20</button>
+        <button type="button" data-count="40">40</button>
+        <button type="button" data-count="all">Todas</button>
+        <button type="button" id="minus5">−5</button>
+        <button type="button" id="plus5">+5</button>
+        <button type="button" id="distanceTextures" class="active">Distância + tamanho</button>
+        <button type="button" id="smallObjectFilter" class="active">Pequenos: baixa prioridade</button>
+      </div>
+      <div class="status-card">
+        <div class="status-main" id="textureStatus">Aguardando modelo…</div>
+        <div class="status-sub" id="gpuStatus">WebGL: detectando…</div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Iluminação dinâmica</div>
+      <div class="buttons">
+        <button type="button" id="allLightsOn">Todas ON</button>
+        <button type="button" id="allLightsOff">Todas OFF</button>
+        <button type="button" id="home">Enquadrar</button>
+        <button type="button" id="shadowsToggle" class="active">Sombras por parede ON</button>
+      </div>
+      <div class="row"><span class="light-name">Intensidade geral</span><div class="light-controls"><input id="globalLightIntensity" type="range" min="0" max="200" value="100"><span id="globalLightPct" class="light-pct">100%</span></div></div>
+      <div class="row"><span class="light-name">Alcance geral</span><div class="light-controls"><input id="globalLightRange" type="range" min="10" max="150" value="100"><span id="globalRangePct" class="light-pct">100%</span></div></div>
+      <div class="row"><span class="light-name">Cor geral</span><div class="light-controls"><input id="globalLightColor" type="color" value="#ffffff"><button type="button" id="resetLightColors">Original</button></div></div>
+      <details><summary id="lightsSummary">Luzes individuais</summary><div id="lights"></div></details>
+      <div class="hint">Inicia zerado: sem texturas, luzes ou sombras. Adicione aos poucos. “Distância + tamanho” prioriza objetos grandes/próximos; objetos pequenos só ganham textura quando ficam relevantes. “Sombras por parede” ativa sombras reais das luzes ligadas e pode pesar.</div>
+    </div>
+  </aside>
+</div>
+
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"}}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+const INITIAL_TEXTURES = 20;
+const LIGHT_INTENSITY_SCALE = 0.40;
+const host=document.getElementById('view'),loading=document.getElementById('loading'),lost=document.getElementById('lost'),textureStatus=document.getElementById('textureStatus'),gpuStatus=document.getElementById('gpuStatus'),lightsEl=document.getElementById('lights'),lightsSummary=document.getElementById('lightsSummary'),sceneLightsEl=document.getElementById('sceneLights'),sceneLightPanel=document.getElementById('sceneLightPanel');
+const scene=new THREE.Scene();scene.background=new THREE.Color(0x111111);const ambientLight=new THREE.HemisphereLight(0xfff4e6,0x556070,0.55);ambientLight.castShadow=false;scene.add(ambientLight);
+const camera=new THREE.PerspectiveCamera(45,1,0.01,100000);camera.position.set(7,7,7);
+const renderer=new THREE.WebGLRenderer({antialias:true,powerPreference:'high-performance'});renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,1.5));renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=.95;renderer.outputColorSpace=THREE.SRGBColorSpace;host.appendChild(renderer.domElement);
+const gl=renderer.getContext();gpuStatus.textContent=`WebGL: ${gl.getParameter(gl.VERSION)} • MAX_TEXTURE_SIZE: ${gl.getParameter(gl.MAX_TEXTURE_SIZE)}`;
+const controls=new OrbitControls(camera,renderer.domElement);controls.enableDamping=true;controls.dampingFactor=.08;
+let root=null,currentTextureCount=0,globalLightScale=1,globalRangeScale=1,distanceTextureMode=true,smallObjectFilter=true,shadowsEnabled=true,textureRefreshTimer=0;const textureGroups=[],lights=[],lightOnIntensity=new Map(),lightBaseIntensity=new Map(),lightOriginalColor=new Map(),lightBaseDistance=new Map();
+function resize(){const w=Math.max(1,host.clientWidth),h=Math.max(1,host.clientHeight);renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix()}new ResizeObserver(resize).observe(host);resize();
+function frameObject(){if(!root)return;const box=new THREE.Box3().setFromObject(root),center=box.getCenter(new THREE.Vector3()),size=box.getSize(new THREE.Vector3()),m=Math.max(size.x,size.y,size.z)||1;controls.target.copy(center);camera.near=Math.max(m/10000,.01);camera.far=m*50;camera.updateProjectionMatrix();camera.position.set(center.x+m*.75,center.y+m*.75,center.z+m*.75);controls.update()}document.getElementById('home').addEventListener('click',frameObject);
+function prettyName(name){return(name||'Luz').replace(/^LightNode_/,'').replaceAll('_',' ').replace('escritorio','escritório').replace('suite','suíte')}
+function collectBaseTextures(object){const bySource=new Map(),seenMaterial=new Set();object.traverse(o=>{if(!o.isMesh)return;o.castShadow=false;o.receiveShadow=false;for(const material of(Array.isArray(o.material)?o.material:[o.material])){if(!material||seenMaterial.has(material.uuid))continue;seenMaterial.add(material.uuid);if(material.aoMap){material.aoMap=null;material.needsUpdate=true}if(material.normalMap){material.normalMap=null;material.needsUpdate=true}if(material.roughnessMap){material.roughnessMap=null;material.needsUpdate=true}if(material.metalnessMap){material.metalnessMap=null;material.needsUpdate=true}const texture=material.map;if(!texture)continue;const sourceKey=texture.source?.uuid||texture.image?.src||texture.uuid;if(!bySource.has(sourceKey))bySource.set(sourceKey,{key:sourceKey,slots:[],textures:new Set()});const group=bySource.get(sourceKey);group.slots.push({material,texture,mesh:o});group.textures.add(texture)}});textureGroups.push(...bySource.values())}
+function updateTextureButtons(){document.querySelectorAll('#textureButtons button[data-count]').forEach(btn=>{const raw=btn.dataset.count,n=raw==='all'?textureGroups.length:Number(raw);btn.classList.toggle('active',n===currentTextureCount)})}
+function groupMetrics(group){let bestDistance=Infinity,maxSize=0;const p=new THREE.Vector3(),box=new THREE.Box3(),size=new THREE.Vector3();for(const slot of group.slots){if(!slot.mesh)continue;slot.mesh.getWorldPosition(p);bestDistance=Math.min(bestDistance,camera.position.distanceToSquared(p));box.setFromObject(slot.mesh);box.getSize(size);maxSize=Math.max(maxSize,size.length())}return{distance:bestDistance,size:maxSize}}
+function applyTextureBudget(){if(!textureGroups.length)return;const count=Math.max(0,Math.min(textureGroups.length,currentTextureCount)),ranked=textureGroups.map((group,index)=>{const m=groupMetrics(group),sizePenalty=smallObjectFilter?1/Math.max(m.size,.08):1;return{group,index,score:distanceTextureMode?m.distance*sizePenalty:index}});ranked.sort((a,b)=>a.score-b.score);const enabled=new Set(ranked.slice(0,count).map(x=>x.group));for(const group of textureGroups){const enable=enabled.has(group);for(const{material,texture}of group.slots){if(enable){if(material.map!==texture){material.map=texture;texture.needsUpdate=true;material.needsUpdate=true}}else if(material.map){material.map=null;material.needsUpdate=true}}}textureStatus.textContent=`Ativas: ${count} / ${textureGroups.length} • ${distanceTextureMode?(smallObjectFilter?'distância + tamanho':'distância'):'ordem fixa'}`;updateTextureButtons()}
+function setTextureCount(requested){currentTextureCount=Math.max(0,Math.min(textureGroups.length,Math.round(requested)));applyTextureBudget()}
+document.querySelectorAll('#textureButtons button[data-count]').forEach(btn=>btn.addEventListener('click',()=>{const raw=btn.dataset.count;setTextureCount(raw==='all'?textureGroups.length:Number(raw))}));document.getElementById('minus5').addEventListener('click',()=>setTextureCount(currentTextureCount-5));document.getElementById('plus5').addEventListener('click',()=>setTextureCount(currentTextureCount+5));document.getElementById('distanceTextures').addEventListener('click',e=>{distanceTextureMode=!distanceTextureMode;e.currentTarget.classList.toggle('active',distanceTextureMode);e.currentTarget.textContent=distanceTextureMode?(smallObjectFilter?'Distância + tamanho':'Por distância'):'Ordem fixa';applyTextureBudget()});document.getElementById('smallObjectFilter').addEventListener('click',e=>{smallObjectFilter=!smallObjectFilter;e.currentTarget.classList.toggle('active',smallObjectFilter);e.currentTarget.textContent=smallObjectFilter?'Pequenos: baixa prioridade':'Pequenos: normal';const d=document.getElementById('distanceTextures');if(distanceTextureMode)d.textContent=smallObjectFilter?'Distância + tamanho':'Por distância';applyTextureBudget()});controls.addEventListener('end',()=>{clearTimeout(textureRefreshTimer);textureRefreshTimer=setTimeout(()=>{if(distanceTextureMode)applyTextureBudget()},80)});
+function collectLights(object){object.traverse(o=>{if(!o.isLight)return;o.castShadow=false;const scaled=Math.max(0,o.intensity*LIGHT_INTENSITY_SCALE),base=scaled||40;lightOnIntensity.set(o,base);lightBaseIntensity.set(o,base);lightOriginalColor.set(o,o.color.clone());lightBaseDistance.set(o,o.distance||0);o.intensity=0;lights.push(o)})}
+function configureLightShadow(light,enabled){const active=shadowsEnabled&&!!enabled;light.castShadow=active;if(!active||!light.shadow)return;light.shadow.mapSize.set(512,512);light.shadow.bias=-.0005;light.shadow.normalBias=.05;if(light.distance>0&&light.shadow.camera){light.shadow.camera.near=Math.max(.05,Math.min(1,light.distance*.02));light.shadow.camera.far=light.distance;light.shadow.camera.updateProjectionMatrix()}light.shadow.needsUpdate=true}
+document.getElementById('shadowsToggle').addEventListener('click',e=>{shadowsEnabled=!shadowsEnabled;renderer.shadowMap.enabled=shadowsEnabled;e.currentTarget.classList.toggle('active',shadowsEnabled);e.currentTarget.textContent=shadowsEnabled?'Sombras por parede ON':'Sombras por parede OFF';root?.traverse(o=>{if(o.isMesh){o.castShadow=shadowsEnabled;o.receiveShadow=shadowsEnabled}});lights.forEach((light,index)=>{const toggle=lightsEl.children[index]?.querySelector('input[type=checkbox]');configureLightShadow(light,!!toggle?.checked)})});
+function colorHex(light){return'#'+light.color.getHexString()}
+function buildLightsPanel(){lightsEl.innerHTML='';lightsSummary.textContent=`Luzes individuais (${lights.length})`;lights.forEach(light=>{const row=document.createElement('div');row.className='row';const name=document.createElement('span');name.className='light-name';name.textContent=prettyName(light.name);const controlsBox=document.createElement('div');controlsBox.className='light-controls';const range=document.createElement('input');range.type='range';range.min='0';range.max='200';range.value='100';range.title='Intensidade';const pct=document.createElement('span');pct.className='light-pct';pct.textContent='100%';const rangeDistance=document.createElement('input');rangeDistance.type='range';rangeDistance.min='10';rangeDistance.max='150';rangeDistance.value='100';rangeDistance.title='Alcance';const color=document.createElement('input');color.type='color';color.value=colorHex(light);color.title='Cor';const label=document.createElement('label');label.className='switch';const input=document.createElement('input');input.type='checkbox';input.checked=false;const slider=document.createElement('span');slider.className='slider';range.addEventListener('input',()=>{const localScale=Number(range.value)/100;pct.textContent=range.value+'%';const value=lightBaseIntensity.get(light)*localScale*globalLightScale;lightOnIntensity.set(light,value);if(input.checked)light.intensity=value});rangeDistance.addEventListener('input',()=>{const baseDistance=lightBaseDistance.get(light);if(baseDistance>0)light.distance=baseDistance*(Number(rangeDistance.value)/100)*globalRangeScale;if(input.checked)configureLightShadow(light,true)});color.addEventListener('input',()=>light.color.set(color.value));input.addEventListener('change',()=>{light.intensity=input.checked?lightOnIntensity.get(light):0;configureLightShadow(light,input.checked)});label.append(input,slider);controlsBox.append(range,pct,rangeDistance,color,label);row.append(name,controlsBox);lightsEl.append(row)})}
+const PHYSICAL_LIGHTS=[{entity:'light.luz_da_sala',match:['sala'],name:'Luz da Sala'},{entity:'light.luz_do_corredor',match:['corredor'],name:'Luz do corredor'},{entity:'light.luz_do_quarto_do_joca',match:['joca'],name:'Luz do quarto do Joca'},{entity:'light.luz_do_escritorio',match:['escritorio','escritório'],name:'Luz do escritório'},{entity:'light.luz_do_quarto',match:['quarto'],exclude:['joca'],name:'Luz do Quarto'},{entity:'light.luz_da_tv',match:['tv'],name:'Luz da TV'},{entity:'light.escritorio_tomada_escritorio_socket_1',match:['abajur'],name:'Abajur escritório'}];
+const lightBridges=new Map();let activeBridge=null,brightnessTimer=0;const lightPopup=document.getElementById('lightPopup'),lightPopupTitle=document.getElementById('lightPopupTitle'),lightPopupState=document.getElementById('lightPopupState'),lightPopupToggle=document.getElementById('lightPopupToggle'),lightBrightness=document.getElementById('lightBrightness'),lightBrightnessRow=document.getElementById('lightBrightnessRow'),lightMarkers=document.getElementById('lightMarkers');
+function getHomeAssistant(){try{const p=window.parent;if(!p||p===window)return null;return p.document?.querySelector('home-assistant')?.hass||null}catch(_){return null}}
+async function apto3dMessage(message){const hass=getHomeAssistant();if(!hass?.connection)throw new Error('Ponte APT0307 indisponível');return hass.connection.sendMessagePromise(message)}
+function mappingForLight(light){const n=prettyName(light.name).toLowerCase();return PHYSICAL_LIGHTS.find(m=>m.match.some(k=>n.includes(k))&&!(m.exclude||[]).some(k=>n.includes(k)))||null}
+function bridgeSupportsBrightness(b){return Number.isFinite(b?.state?.brightness)}
+function byteHex(v){return Math.max(0,Math.min(255,Math.round(Number(v)||0))).toString(16).padStart(2,'0')}
+function applyBridgeColor(b,state){const hassState=getHomeAssistant()?.states?.[b.map.entity];const attrs=hassState?.attributes||{};const rgb=Array.isArray(state?.rgb_color)?state.rgb_color:attrs.rgb_color;if(Array.isArray(rgb)&&rgb.length>=3){b.light.color.set('#'+byteHex(rgb[0])+byteHex(rgb[1])+byteHex(rgb[2]));return}const hs=Array.isArray(state?.hs_color)?state.hs_color:attrs.hs_color;if(Array.isArray(hs)&&hs.length>=2&&Number.isFinite(Number(hs[0]))&&Number.isFinite(Number(hs[1]))){b.light.color.setHSL((((Number(hs[0])%360)+360)%360)/360,Math.max(0,Math.min(100,Number(hs[1])))/100,.5);return}b.light.color.copy(lightOriginalColor.get(b.light))}
+function applyBridgeState(b,state){if(!b||!state)return;b.state=state;const on=state.state==='on',unavailable=state.state==='unavailable'||state.state==='unknown',brightness=Number.isFinite(state.brightness)?state.brightness:255,base=lightBaseIntensity.get(b.light)||1,value=base*Math.max(.05,brightness/255);lightOnIntensity.set(b.light,value);applyBridgeColor(b,state);b.light.intensity=on?value:0;configureLightShadow(b.light,on);b.marker.classList.toggle('on',on&&!unavailable);b.marker.classList.toggle('off',!on||unavailable);b.marker.title=unavailable?b.map.name+' — indisponível':b.map.name;if(activeBridge===b){lightPopupTitle.textContent=b.map.name;lightPopupState.textContent=unavailable?'Indisponível':(on?'Ligada':'Desligada');lightPopupToggle.textContent=on?'●':'○';lightPopupToggle.classList.toggle('active',on);lightPopupToggle.disabled=unavailable;lightBrightnessRow.style.display=bridgeSupportsBrightness(b)?'flex':'none';if(bridgeSupportsBrightness(b))lightBrightness.value=String(brightness)}}
+async function setBridgeLight(b,on,brightness=null){const msg={type:'apto3d/set_light',entity_id:b.map.entity,on:!!on};if(on&&Number.isFinite(brightness))msg.brightness=Math.max(1,Math.min(255,Math.round(brightness)));applyBridgeState(b,await apto3dMessage(msg))}
+function openBridgePopup(b){activeBridge=b;applyBridgeState(b,b.state||{state:'unknown',brightness:null});lightPopup.classList.add('open');updateLightMarkers()}
+async function connectPhysicalLights(){const hass=getHomeAssistant();for(const light of lights){const map=mappingForLight(light);if(!map||lightBridges.has(map.entity))continue;const marker=document.createElement('button');marker.type='button';marker.className='lightMarker off';marker.textContent='💡';marker.title=map.name;lightMarkers.appendChild(marker);const b={map,light,marker,state:null,unsubscribe:null};lightBridges.set(map.entity,b);marker.addEventListener('click',e=>{e.stopPropagation();openBridgePopup(b)});try{applyBridgeState(b,await apto3dMessage({type:'apto3d/get_light_state',entity_id:map.entity}));b.unsubscribe=await hass.connection.subscribeMessage(ev=>applyBridgeState(b,ev),{type:'apto3d/subscribe_light',entity_id:map.entity})}catch(err){console.warn('APT0307',map.entity,err)}}}
+function updateLightMarkers(){const p=new THREE.Vector3();for(const b of lightBridges.values()){b.light.getWorldPosition(p);p.project(camera);const visible=p.z>-1&&p.z<1&&Math.abs(p.x)<=1.15&&Math.abs(p.y)<=1.15;b.marker.style.visibility=visible?'visible':'hidden';if(!visible)continue;const x=(p.x*.5+.5)*host.clientWidth,y=(-p.y*.5+.5)*host.clientHeight;b.marker.style.left=x+'px';b.marker.style.top=y+'px';if(activeBridge===b&&lightPopup.classList.contains('open')){const pw=Math.min(290,Math.max(220,host.clientWidth-24));lightPopup.style.left=Math.max(12,Math.min(host.clientWidth-pw-12,x+18))+'px';lightPopup.style.top=Math.max(12,Math.min(host.clientHeight-190,y+18))+'px'}}}
+document.getElementById('lightPopupClose').addEventListener('click',()=>lightPopup.classList.remove('open'));lightPopup.addEventListener('click',e=>e.stopPropagation());host.addEventListener('pointerdown',e=>{if(lightPopup.classList.contains('open')&&!lightPopup.contains(e.target)&&!e.target.classList?.contains('lightMarker'))lightPopup.classList.remove('open')});lightPopupToggle.addEventListener('click',()=>{if(activeBridge)setBridgeLight(activeBridge,activeBridge.state?.state!=='on',Number(lightBrightness.value)).catch(console.warn)});lightBrightness.addEventListener('input',()=>{clearTimeout(brightnessTimer);if(!activeBridge||activeBridge.state?.state!=='on')return;brightnessTimer=setTimeout(()=>setBridgeLight(activeBridge,true,Number(lightBrightness.value)).catch(console.warn),120)});
+function buildSceneLightsPanel(){sceneLightsEl.innerHTML='';lights.forEach(light=>{const map=mappingForLight(light),row=document.createElement('div');row.className='scene-light-row';const name=document.createElement('span');name.className='scene-light-name';name.textContent=prettyName(light.name);const actions=document.createElement('div');actions.className='scene-light-actions';const intensity=document.createElement('input');intensity.type='range';intensity.min='1';intensity.max='100';intensity.value='100';const toggle=document.createElement('button');toggle.type='button';toggle.textContent='○';let localOn=false;intensity.addEventListener('input',()=>{if(map){const b=lightBridges.get(map.entity);if(b?.state?.state==='on'){clearTimeout(brightnessTimer);brightnessTimer=setTimeout(()=>setBridgeLight(b,true,Math.round(Number(intensity.value)*2.55)).catch(console.warn),120)}}else{const value=lightBaseIntensity.get(light)*(Number(intensity.value)/100);lightOnIntensity.set(light,value);if(localOn)light.intensity=value}});toggle.addEventListener('click',()=>{if(map){const b=lightBridges.get(map.entity);if(b)setBridgeLight(b,b.state?.state!=='on',Math.round(Number(intensity.value)*2.55)).catch(console.warn)}else{localOn=!localOn;toggle.textContent=localOn?'●':'○';light.intensity=localOn?lightOnIntensity.get(light):0;configureLightShadow(light,localOn)}});actions.append(intensity,toggle);row.append(name,actions);sceneLightsEl.append(row)})}
+document.getElementById('sceneLightsButton').addEventListener('click',e=>{sceneLightPanel.classList.toggle('open');e.currentTarget.classList.toggle('on',sceneLightPanel.classList.contains('open'))});document.getElementById('sceneHomeButton').addEventListener('click',frameObject);document.getElementById('sceneShadowsButton').addEventListener('click',e=>{document.getElementById('shadowsToggle').click();e.currentTarget.classList.toggle('on',shadowsEnabled)});
+function setAllLights(on){lights.forEach(light=>{light.intensity=on?lightOnIntensity.get(light):0;configureLightShadow(light,on)});lightsEl.querySelectorAll('input[type=checkbox]').forEach(cb=>cb.checked=on)}document.getElementById('allLightsOn').addEventListener('click',()=>setAllLights(true));document.getElementById('allLightsOff').addEventListener('click',()=>setAllLights(false));
+document.getElementById('globalLightIntensity').addEventListener('input',e=>{globalLightScale=Number(e.target.value)/100;document.getElementById('globalLightPct').textContent=e.target.value+'%';lights.forEach((light,index)=>{const row=lightsEl.children[index],localRange=row?.querySelector('input[type=range]'),localScale=localRange?Number(localRange.value)/100:1,value=lightBaseIntensity.get(light)*localScale*globalLightScale;lightOnIntensity.set(light,value);const toggle=row?.querySelector('input[type=checkbox]');if(!toggle||toggle.checked)light.intensity=value})});
+document.getElementById('globalLightRange').addEventListener('input',e=>{globalRangeScale=Number(e.target.value)/100;document.getElementById('globalRangePct').textContent=e.target.value+'%';lights.forEach((light,index)=>{const baseDistance=lightBaseDistance.get(light);if(baseDistance<=0)return;const sliders=lightsEl.children[index]?.querySelectorAll('input[type=range]'),localDistance=sliders?.[1]?Number(sliders[1].value)/100:1;light.distance=baseDistance*localDistance*globalRangeScale;const toggle=lightsEl.children[index]?.querySelector('input[type=checkbox]');if(toggle?.checked)configureLightShadow(light,true)})});
+document.getElementById('globalLightColor').addEventListener('input',e=>{lights.forEach((light,index)=>{light.color.set(e.target.value);const picker=lightsEl.children[index]?.querySelector('input[type=color]');if(picker)picker.value=e.target.value})});document.getElementById('resetLightColors').addEventListener('click',()=>{lights.forEach((light,index)=>{light.color.copy(lightOriginalColor.get(light));const picker=lightsEl.children[index]?.querySelector('input[type=color]');if(picker)picker.value=colorHex(light)});document.getElementById('globalLightColor').value='#ffffff'});
+
+/* ROBOT POSITION TEST — isolated from DIAMANTE RGB visual engine */
+const ROBOT_ENTITY='sensor.xiaomi_robot_vacuum_h50_vacuum_position';
+const ROBOT_SCALE=0.084;
+const ROBOT_X_OFFSET=1061.012207;
+const ROBOT_Y_OFFSET=827.820496;
+const UE_TO_GLB=0.01;
+const ROBOT_YAW_OFFSET=105.608902;
+let robotObject=null,robotBaseY=0,lastRobotRaw='';
+
+function findRobotObject(){
+  if(!root)return null;
+  const candidates=[];
+  root.traverse(o=>{
+    const n=(o.name||'').toLowerCase();
+    if(/robot|robo|robô|vacuum|aspirador|xiaomi/.test(n) && !o.isLight) candidates.push(o);
+  });
+  if(!candidates.length){
+    console.warn('[APT0307 robot] Nenhum objeto candidato encontrado no GLB.');
+    return null;
+  }
+  candidates.sort((a,b)=>{
+    const am=a.isMesh?0:1,bm=b.isMesh?0:1;
+    return am-bm || (a.name||'').length-(b.name||'').length;
+  });
+  robotObject=candidates[0];
+  robotBaseY=robotObject.position.y;
+  console.info('[APT0307 robot] objeto:',robotObject.name,'candidatos:',candidates.map(o=>o.name));
+  return robotObject;
+}
+function updateRobotFromHA(){
+  if(!robotObject||!root)return;
+  const raw=getHomeAssistant()?.states?.[ROBOT_ENTITY]?.state;
+  if(!raw||raw==='unknown'||raw==='unavailable'||raw===lastRobotRaw)return;
+  let p;
+  try{p=typeof raw==='string'?JSON.parse(raw):raw}catch(e){console.warn('[APT0307 robot] posição inválida',raw);return}
+  if(!Number.isFinite(Number(p?.x))||!Number.isFinite(Number(p?.y)))return;
+  lastRobotRaw=raw;
+  // Mesma calibração usada hoje no UE: Scale 0.084, X invertido, offsets.
+  // Exportação UE -> GLB em 0.01: centímetros do UE viram unidades do GLB.
+  const ueX=(-Number(p.x))*ROBOT_SCALE+ROBOT_X_OFFSET;
+  const ueY=( Number(p.y))*ROBOT_SCALE+ROBOT_Y_OFFSET;
+  robotObject.position.x=ueX*UE_TO_GLB;
+  robotObject.position.z=ueY*UE_TO_GLB;
+  robotObject.position.y=robotBaseY;
+  if(Number.isFinite(Number(p.a))){
+    robotObject.rotation.y=THREE.MathUtils.degToRad(-(Number(p.a)+ROBOT_YAW_OFFSET));
+  }
+  robotObject.updateMatrixWorld(true);
+  console.debug('[APT0307 robot]',p,'=> GLB',{x:robotObject.position.x,z:robotObject.position.z});
+}
+
+renderer.domElement.addEventListener('webglcontextlost',e=>{e.preventDefault();lost.style.display='block';loading.style.display='none'},false);renderer.domElement.addEventListener('webglcontextrestored',()=>{lost.style.display='none';applyTextureBudget()},false);
+const loader=new GLTFLoader();loader.load('./Main.glb',gltf=>{root=gltf.scene;collectBaseTextures(root);collectLights(root);setTextureCount(Math.min(INITIAL_TEXTURES,textureGroups.length));scene.add(root);root.traverse(o=>{if(o.isMesh){o.castShadow=true;o.receiveShadow=true}});findRobotObject();updateRobotFromHA();buildLightsPanel();buildSceneLightsPanel();frameObject();connectPhysicalLights();loading.textContent=`Pronto • ${textureGroups.length} texturas base • ${lights.length} luzes`;setTimeout(()=>loading.style.display='none',2200)},progress=>{if(progress.total)loading.textContent=`Carregando… ${Math.round(progress.loaded/progress.total*100)}%`},err=>{console.error(err);loading.style.display='block';loading.textContent='Erro ao carregar Main.glb: '+(err?.message||err)});
+renderer.setAnimationLoop(()=>{controls.update();updateLightMarkers();updateRobotFromHA();renderer.render(scene,camera)});
+</script>
+</body>
+</html>
