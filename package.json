@@ -1,0 +1,8 @@
+{
+  "name": "ha3d",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node --check custom_components/ha3d/frontend/ha3d-panel.js"
+  }
+}
