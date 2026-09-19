@@ -1,41 +1,107 @@
 # HA3D
 
-Frontend 3D genérico para Home Assistant, independente do projeto APT0307.
+HA3D transforma um modelo `.glb` em uma interface 3D genérica para Home Assistant.
+
+A meta do projeto é simples: instalar o HA3D, subir um GLB e vincular objetos do modelo às entidades do Home Assistant sem editar HTML específico para cada casa.
 
 ## Estado atual
 
-Primeira base funcional criada:
+A branch de desenvolvimento do app já contém um primeiro MVP instalável como custom integration:
 
-- viewer WebGL com Three.js;
-- carregamento GLB/GLTF;
+- integração `custom_components/ha3d` com Config Flow;
+- painel **HA3D** na barra lateral do Home Assistant;
+- upload autenticado de um único arquivo `.glb`;
+- armazenamento do modelo em `/config/www/ha3d/models/model.glb`;
+- configuração persistente em `.storage`;
+- viewer Three.js fullscreen;
 - OrbitControls para mouse/toque;
 - enquadramento automático do modelo;
-- raycasting/picking de objetos 3D;
-- adapter separado para Home Assistant;
-- layout fullscreen para TV/mobile;
-- configuração central em `src/config.js`.
+- auto-binding por nome de objeto;
+- picking/raycasting;
+- controle `homeassistant.toggle` para `light`, `switch`, `input_boolean` e `fan`;
+- suporte a bindings explícitos no backend.
 
-## Modelo
+O backup do viewer funcional original continua isolado em `backup/apto3d-original/` e não é alterado pelo novo app.
 
-Coloque o modelo em:
+## Convenção do GLB
 
-`models/home.glb`
+O modo mais simples é dar ao objeto 3D exatamente o mesmo nome da entidade no Home Assistant.
 
-ou altere `model` em `src/config.js`.
+Exemplos:
 
-## Home Assistant
+```text
+light.luz_da_sala
+light.luz_do_escritorio
+switch.impressora_3d
+media_player.tv_sala
+binary_sensor.janela_esquerda
+vacuum.xiaomi_robot_vacuum_h50
+```
 
-Destino planejado:
+Quando `auto_bind` está ativo, HA3D procura esses nomes em `hass.states` e cria os vínculos automaticamente.
 
-`/config/www/ha3d/`
+Também existe suporte a um mapa explícito de bindings:
 
-O projeto não modifica `/config/www/apto3d/` nem depende do APT0307.
+```json
+{
+  "Lamp_Sala": "light.luz_da_sala",
+  "Printer": "switch.impressora_3d"
+}
+```
+
+O editor visual desse mapa será a próxima etapa.
+
+## Instalação de desenvolvimento
+
+Copie `custom_components/ha3d/` para:
+
+```text
+/config/custom_components/ha3d/
+```
+
+Reinicie o Home Assistant e adicione **HA3D** em:
+
+```text
+Configurações → Dispositivos e serviços → Adicionar integração
+```
+
+Depois abra **HA3D** na barra lateral e use **Subir GLB**.
+
+## Segurança
+
+- upload exige usuário administrador;
+- somente `.glb` é aceito;
+- o arquivo é salvo sempre em um caminho fixo;
+- não existe escrita genérica em `/config`;
+- o upload tem limite de 250 MB;
+- o GLB é validado pelo magic header `glTF` antes de substituir o modelo atual.
+
+## Arquitetura
+
+```text
+custom_components/ha3d/
+├── __init__.py          # lifecycle, painel e rotas
+├── config_flow.py       # instalação pela UI
+├── const.py
+├── http.py              # config + upload GLB
+├── storage.py           # bindings/config persistentes
+├── manifest.json
+├── strings.json
+├── translations/
+└── frontend/
+    └── ha3d-panel.js    # viewer e integração com hass
+```
 
 ## Próximas etapas
 
-1. bindings objeto 3D ↔ entity_id;
-2. estados em tempo real;
-3. ligar/desligar entidades clicando no modelo;
-4. painel de configuração;
-5. otimizações específicas para TV/iOS;
-6. posição do robô e overlays 3D.
+1. editor visual objeto ↔ entidade;
+2. efeitos visuais por estado `on/off/unavailable`;
+3. presets por domínio (luz, TV, porta, janela, vacuum, climate etc.);
+4. posição e animação do robô;
+5. empacotar Three.js localmente para funcionamento totalmente offline;
+6. testes automatizados e validação HACS/hassfest;
+7. releases versionadas para instalação direta pelo HACS.
+
+## Base standalone
+
+A base antiga em `index.html`, `src/` e `models/` continua no repositório por enquanto como laboratório do viewer. A implementação principal passará gradualmente para `custom_components/ha3d/`.
