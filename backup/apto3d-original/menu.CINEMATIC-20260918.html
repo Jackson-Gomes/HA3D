@@ -1,0 +1,63 @@
+<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>APT0307 Cinematic</title><style>*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#111}#stage{position:fixed;inset:0;width:100%;height:100%;border:0;background:#111}.menu{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);z-index:50;display:flex;gap:8px;padding:8px;background:#101010dc;border:1px solid #454545;border-radius:18px;backdrop-filter:blur(10px);box-shadow:0 5px 20px #0008}.menu button{width:46px;height:46px;border-radius:50%;border:1px solid #494949;background:#242424;color:#d8d8d8;display:grid;place-items:center;padding:0;cursor:pointer}.menu button.active{background:#176eb5;border-color:#63baff;color:#fff;box-shadow:0 0 12px #188be766}.menu svg{width:25px;height:25px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}#boot{position:fixed;left:12px;top:12px;z-index:60;background:#111d;color:#eee;padding:8px 10px;border-radius:8px;font:13px system-ui}</style></head><body><iframe id="stage" title="Apartamento 3D"></iframe><div id="boot">Carregando câmera cinematográfica…</div><nav class="menu" aria-label="Filtros do Digital Twin"><button class="active" data-filter="lights" title="Iluminação" aria-label="Iluminação"><svg viewBox="0 0 24 24"><path d="M9 18h6M10 22h4M8.7 15.4A7 7 0 1 1 15.3 15.4C14.4 16.1 14 16.8 14 18h-4c0-1.2-.4-1.9-1.3-2.6Z"/></svg></button><button data-filter="devices" title="Aparelhos" aria-label="Aparelhos"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="14" height="11" rx="1.5"/><path d="M7 20h6M10 15v5M19 8h2v10h-6v-1"/></svg></button><button data-filter="outlets" title="Tomadas" aria-label="Tomadas"><svg viewBox="0 0 24 24"><path d="M8 3v5M16 3v5M6 8h12v3a6 6 0 0 1-6 6 6 6 0 0 1-6-6V8ZM12 17v4"/></svg></button><button data-filter="openings" title="Portas e janelas" aria-label="Portas e janelas"><svg viewBox="0 0 24 24"><path d="M4 21h16M6 21V3h11v18M9 6l5-1v13l-5-1V6Z"/><circle cx="12.5" cy="11.5" r=".6" fill="currentColor" stroke="none"/></svg></button></nav><script>
+const stage=document.getElementById('stage'),boot=document.getElementById('boot');let active='lights';
+const proxy=document.createElement('home-assistant');proxy.style.display='none';document.body.appendChild(proxy);
+function syncHass(){try{const ha=window.parent?.document?.querySelector('home-assistant');if(ha?.hass)proxy.hass=ha.hass}catch(e){}}setInterval(syncHass,400);syncHass();
+const CAMERA_PATCH=`
+let cinematicActive=false,cinematicBatchTimer=0;const cinematicPending=new Set(),cinematicQueue=[];
+function cinematicEase(t){t=Math.max(0,Math.min(1,t));return t*t*t*(t*(t*6-15)+10)}
+function queueCinematicFocus(entity){cinematicPending.add(entity);clearTimeout(cinematicBatchTimer);cinematicBatchTimer=setTimeout(()=>{const batch=[...cinematicPending];cinematicPending.clear();if(!batch.length)return;if(cinematicActive)cinematicQueue.push(batch);else runCinematicFocus(batch)},240)}
+function runCinematicFocus(entities){
+ const bridges=entities.map(e=>lightBridges.get(e)).filter(Boolean);if(!bridges.length){finishCinematic();return}
+ const points=bridges.map(b=>{const v=new THREE.Vector3();b.light.getWorldPosition(v);return v});
+ const focus=new THREE.Vector3();points.forEach(p=>focus.add(p));focus.multiplyScalar(1/points.length);
+ const box=root?new THREE.Box3().setFromObject(root):null,size=box?box.getSize(new THREE.Vector3()):new THREE.Vector3(10,10,10),sceneScale=Math.max(size.x,size.y,size.z,1);
+ const spread=Math.max(0,...points.map(p=>p.distanceTo(focus))),startPos=camera.position.clone(),startTarget=controls.target.clone();
+ let dir=startPos.clone().sub(focus);const startDist=Math.max(dir.length(),sceneScale*.2);if(dir.lengthSq()<1e-6)dir.set(1,.45,1);dir.normalize();
+ const up=new THREE.Vector3(0,1,0),side=new THREE.Vector3().crossVectors(up,dir).normalize();
+ const nearDist=Math.min(startDist*.36,Math.max(startDist*.20,sceneScale*.075+spread*2.3));
+ const entryDir=dir.clone().applyAxisAngle(up,THREE.MathUtils.degToRad(-7));
+ const orbitDir=dir.clone().applyAxisAngle(up,THREE.MathUtils.degToRad(12));
+ const nearA=focus.clone().add(entryDir.multiplyScalar(nearDist)).add(up.clone().multiplyScalar(sceneScale*.018));
+ const nearB=focus.clone().add(orbitDir.multiplyScalar(nearDist)).add(up.clone().multiplyScalar(sceneScale*.022));
+ const c1=startPos.clone().lerp(nearA,.38).add(side.clone().multiplyScalar(sceneScale*.025));
+ const c2=startPos.clone().lerp(nearA,.78).add(side.clone().multiplyScalar(sceneScale*.055));
+ const approach=new THREE.CubicBezierCurve3(startPos,c1,c2,nearA);
+ const r1=nearB.clone().lerp(startPos,.30).add(side.clone().multiplyScalar(-sceneScale*.045));
+ const r2=nearB.clone().lerp(startPos,.72).add(side.clone().multiplyScalar(-sceneScale*.018));
+ const retreat=new THREE.CubicBezierCurve3(nearB,r1,r2,startPos);
+ const oldDamping=controls.enableDamping;cinematicActive=true;controls.enabled=false;controls.enableDamping=false;
+ const begun=performance.now(),approachMs=2400,orbitMs=1150,holdMs=380,returnMs=2300,total=6230;
+ function frame(now){
+  if(!cinematicActive)return;const e=now-begun;
+  if(e<approachMs){const u=cinematicEase(e/approachMs);camera.position.copy(approach.getPoint(u));controls.target.lerpVectors(startTarget,focus,cinematicEase(Math.min(1,u*1.08)))}
+  else if(e<approachMs+orbitMs){const u=cinematicEase((e-approachMs)/orbitMs);camera.position.lerpVectors(nearA,nearB,u);controls.target.copy(focus)}
+  else if(e<approachMs+orbitMs+holdMs){camera.position.copy(nearB);controls.target.copy(focus)}
+  else if(e<total){const u=cinematicEase((e-approachMs-orbitMs-holdMs)/returnMs);camera.position.copy(retreat.getPoint(u));controls.target.lerpVectors(focus,startTarget,u)}
+  else{camera.position.copy(startPos);controls.target.copy(startTarget);controls.enabled=true;controls.enableDamping=oldDamping;cinematicActive=false;controls.update();setTimeout(()=>{const next=cinematicQueue.shift();if(next)runCinematicFocus(next)},180);return}
+  camera.lookAt(controls.target);requestAnimationFrame(frame)
+ }
+ requestAnimationFrame(frame)
+}
+function finishCinematic(){cinematicActive=false;const next=cinematicQueue.shift();if(next)setTimeout(()=>runCinematicFocus(next),180)}
+`;
+const APPLY_OLD="function applyBridgeState(b,state){if(!b||!state)return;b.state=state;const on=state.state==='on',unavailable=state.state==='unavailable'||state.state==='unknown',brightness=Number.isFinite(state.brightness)?state.brightness:255,base=lightBaseIntensity.get(b.light)||1,value=base*Math.max(.05,brightness/255);";
+const APPLY_NEW="function applyBridgeState(b,state){if(!b||!state)return;const previous=b.state?.state,shouldCinematic=(previous==='on'||previous==='off')&&(state.state==='on'||state.state==='off')&&previous!==state.state;b.state=state;if(shouldCinematic)queueCinematicFocus(b.map.entity);const on=state.state==='on',unavailable=state.state==='unavailable'||state.state==='unknown',brightness=Number.isFinite(state.brightness)?state.brightness:255,base=lightBaseIntensity.get(b.light)||1,value=base*Math.max(.05,brightness/255);";
+async function bootScene(){
+ try{let html=await (await fetch('./index.ROBOTTEST-20260918.html?v=202609181700',{cache:'no-store'})).text();
+ const anchor="const controls=new OrbitControls(camera,renderer.domElement);controls.enableDamping=true;controls.dampingFactor=.08;";
+ if(!html.includes(anchor)||!html.includes(APPLY_OLD))throw new Error('âncoras da câmera não encontradas');
+ html=html.replace(anchor,anchor+CAMERA_PATCH).replace(APPLY_OLD,APPLY_NEW).replace("renderer.setAnimationLoop(()=>{controls.update();updateLightMarkers();updateRobotFromHA();renderer.render(scene,camera)});","renderer.setAnimationLoop(()=>{if(!cinematicActive)controls.update();updateLightMarkers();updateRobotFromHA();renderer.render(scene,camera)});");
+ stage.srcdoc=html;
+ }catch(e){console.error(e);boot.textContent='Erro ao preparar câmera: '+e.message}
+}
+function inner(){try{return stage.contentDocument}catch(e){return null}}
+const ENTITY_BY_MARKER={'luz da sala':'light.luz_da_sala','luz do corredor':'light.luz_do_corredor','luz do quarto do joca':'light.luz_do_quarto_do_joca','luz do escritório':'light.luz_do_escritorio','luz do quarto':'light.luz_do_quarto','luz da tv':'light.luz_da_tv','abajur escritório':'light.escritorio_tomada_escritorio_socket_1'};
+function markerEntity(m){const name=(m?.title||'').split(' — ')[0].trim().toLowerCase();return ENTITY_BY_MARKER[name]||null}
+function openNativeMoreInfo(entityId){try{const p=window.parent,target=p?.document?.querySelector('home-assistant');if(!target)return false;target.dispatchEvent(new p.CustomEvent('hass-more-info',{detail:{entityId},bubbles:true,composed:true}));return true}catch(e){return false}}
+function installNativeEntityMenus(){const d=inner();if(!d)return;const root=d.getElementById('lightMarkers');if(!root||root.dataset.cinematicBound)return;root.dataset.cinematicBound='1';root.addEventListener('click',e=>{const m=e.target?.closest?.('.lightMarker');if(!m)return;const id=markerEntity(m);if(!id)return;e.preventDefault();e.stopPropagation();e.stopImmediatePropagation();const popup=d.getElementById('lightPopup');if(popup)popup.classList.remove('open');openNativeMoreInfo(id)},true)}
+function installUnavailableState(){const d=inner();if(!d||d.getElementById('cinematic-unavailable'))return;const s=d.createElement('style');s.id='cinematic-unavailable';s.textContent=`@keyframes aptoUnavailablePulse{0%,100%{border-color:#8b3b35;opacity:.72}50%{border-color:#ff6858;box-shadow:0 0 16px rgba(255,92,74,.72);opacity:1}}.lightMarker.aptoUnavailable{background:#2a2020e8!important;color:#ffb1a8!important;animation:aptoUnavailablePulse 1.35s ease-in-out infinite}`;d.head.appendChild(s);const sync=()=>d.querySelectorAll('.lightMarker').forEach(m=>m.classList.toggle('aptoUnavailable',(m.title||'').toLowerCase().includes('indisponível')));sync();setInterval(sync,1000)}
+function applyFilter(){const d=inner();if(!d)return;installUnavailableState();installNativeEntityMenus();const old=d.getElementById('sceneControls');if(old)old.style.display='none';const panel=d.getElementById('sceneLightPanel');if(panel)panel.classList.remove('open');const popup=d.getElementById('lightPopup');if(active!=='lights'&&popup)popup.classList.remove('open');const lm=d.getElementById('lightMarkers');if(lm)lm.style.display=active==='lights'?'block':'none';d.querySelectorAll('[data-apto-category]').forEach(el=>el.style.display=el.dataset.aptoCategory===active?'':'none');stage.style.filter=active==='lights'?'brightness(1)':'brightness(1.20)'}
+stage.addEventListener('load',()=>{syncHass();applyFilter();setTimeout(applyFilter,500);setTimeout(applyFilter,1800);boot.style.display='none'});
+document.querySelectorAll('.menu button').forEach(btn=>btn.addEventListener('click',()=>{active=btn.dataset.filter;document.querySelectorAll('.menu button').forEach(x=>x.classList.toggle('active',x===btn));applyFilter()}));
+bootScene();
+</script></body></html>
