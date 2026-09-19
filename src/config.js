@@ -1,0 +1,1 @@
+export const HA3D_CONFIG={model:"./models/home.glb",bindings:{},viewer:{background:0x101014,exposure:1}};
