@@ -1,4 +1,4 @@
-import "./ha3d-cinematic.js";
+import "./ha3d-cinematic.js?v=0.1.5";
 
 // Entry module for the HA3D panel. Keeping this file as the registered
 // Home Assistant module gives us a stable cache-busting point while the
@@ -16,10 +16,8 @@ if (!proto.__ha3dSceneLightTuned) {
   proto._restoreUnboundModelLights = function (...args) {
     const result = originalRestoreUnboundModelLights.apply(this, args);
 
-    // The generic viewer restores non-HA lights from the GLB so baked/global
-    // scene illumination is not black. The original 40% scale was too strong
-    // for APT0307 on mobile, so keep those scene lights at ~18% of export
-    // intensity while HA-bound physical lights retain their normal scale.
+    // Keep GLB/global lights only as a soft fill. HA-bound physical lights
+    // retain their normal scale and continue following Home Assistant state.
     const boundLights = new Set(
       [...(this._lightBindings?.values?.() || [])]
         .map((binding) => binding.light)
@@ -28,7 +26,7 @@ if (!proto.__ha3dSceneLightTuned) {
 
     for (const light of this._modelLights || []) {
       if (boundLights.has(light)) continue;
-      light.intensity *= 0.45;
+      light.intensity *= 0.30;
       light.castShadow = false;
     }
 
