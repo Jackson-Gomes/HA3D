@@ -4,8 +4,9 @@ const Panel = customElements.get("ha3d-panel");
 if (!Panel) throw new Error("HA3D panel was not registered");
 const proto = Panel.prototype;
 
-const FIX_VERSION = "20260919-5";
-const TV_ENTITIES = [
+const FIX_VERSION = "20260919-6";
+const TV_LIGHT_ENTITY = "light.luz_da_tv";
+const TV_MEDIA_ENTITIES = [
   "media_player.tv_da_sala_de_estar",
   "media_player.sala_de_estar_tv_da_sala",
 ];
@@ -25,54 +26,28 @@ function findEntity(hass, candidates) {
   const states = hass?.states || {};
   const usable = candidates.find((entity) => {
     const state = states[entity];
-    return state && !["unknown", "unavailable"].includes(state.state) && state.attributes?.assumed_state !== true;
+    return state && !["unknown", "unavailable"].includes(state.state);
   });
   return usable || candidates.find((entity) => states[entity]) || null;
 }
 
 function findAnchor(model, entity, aliases = []) {
-  const targets = new Set([normalize(entity), ...aliases.map(normalize)]);
+  const exactTarget = normalize(entity);
+  const targets = new Set(aliases.map(normalize));
   let exact = null;
   let alias = null;
   model?.traverse((object) => {
     const name = normalize(object.name);
     if (!name) return;
-    if (name === normalize(entity)) exact ||= object;
+    if (name === exactTarget) exact ||= object;
     else if (targets.has(name)) alias ||= object;
   });
   return exact || alias;
 }
 
-function isTvLight(light) {
+function isTvLampLight(light) {
   const name = normalize(light?.name);
   return name.includes("tv") || name.includes("televisao") || name.includes("television");
-}
-
-function convertTvPointToSpot(panel) {
-  panel._modelLights = (panel._modelLights || []).map((light) => {
-    if (!light?.isPointLight || !isTvLight(light)) return light;
-
-    const spot = new THREE.SpotLight(light.color.clone(), 0);
-    spot.name = light.name;
-    spot.position.copy(light.position);
-    spot.quaternion.copy(light.quaternion);
-    spot.scale.copy(light.scale);
-    spot.userData = { ...light.userData, ha3dTvDirectional: true };
-    spot.angle = Math.PI / 3;
-    spot.penumbra = 0.45;
-    spot.decay = 2;
-    spot.distance = Number(light.userData?.ha3dBaseDistance) > 0
-      ? light.userData.ha3dBaseDistance
-      : 3;
-
-    spot.target.position.set(0, 0, -1);
-    spot.add(spot.target);
-
-    const parent = light.parent;
-    parent?.add(spot);
-    parent?.remove(light);
-    return spot;
-  });
 }
 
 function makeHardMarker(panel, entity, title, aliases = [], glyph = "💡") {
@@ -84,25 +59,33 @@ function makeHardMarker(panel, entity, title, aliases = [], glyph = "💡") {
   if (binding?.marker) binding.marker.textContent = glyph;
 }
 
-if (!proto.__ha3dTvWallFixV5) {
-  proto.__ha3dTvWallFixV5 = true;
+function configurePhysicalShadow(light, on) {
+  if (!light) return;
+  light.castShadow = Boolean(on);
+  if (!on || !light.shadow) return;
+  light.shadow.mapSize.set(512, 512);
+  light.shadow.bias = -0.0005;
+  light.shadow.normalBias = 0.02;
+  if (light.distance > 0 && light.shadow.camera) {
+    light.shadow.camera.near = Math.max(0.02, Math.min(0.5, light.distance * 0.02));
+    light.shadow.camera.far = light.distance;
+    light.shadow.camera.updateProjectionMatrix();
+  }
+  light.shadow.needsUpdate = true;
+}
 
-  const originalBindModelLights = proto._bindModelLights;
-  proto._bindModelLights = function (...args) {
-    convertTvPointToSpot(this);
-    return originalBindModelLights.apply(this, args);
-  };
+if (!proto.__ha3dTvWallFixV6) {
+  proto.__ha3dTvWallFixV6 = true;
 
+  // The GLB lamp above the TV is a normal Home Assistant light.
+  // It is NOT the television/media_player.
   const originalMappingForLight = proto._mappingForLight;
   proto._mappingForLight = function (light) {
-    if (isTvLight(light)) {
-      const tvEntity = findEntity(this._hass, TV_ENTITIES);
-      if (tvEntity) {
-        return {
-          entity: tvEntity,
-          name: this._hass.states[tvEntity]?.attributes?.friendly_name || "TV da sala",
-        };
-      }
+    if (isTvLampLight(light) && this._hass?.states?.[TV_LIGHT_ENTITY]) {
+      return {
+        entity: TV_LIGHT_ENTITY,
+        name: this._hass.states[TV_LIGHT_ENTITY]?.attributes?.friendly_name || "Luz da TV",
+      };
     }
 
     const name = normalize(light?.name);
@@ -116,6 +99,8 @@ if (!proto.__ha3dTvWallFixV5) {
     return originalMappingForLight.call(this, light);
   };
 
+  // Preserve the old circular marker style. Add only the non-light devices that
+  // the old light-only marker pass does not create by itself.
   const originalBindEntityMarkers = proto._bindEntityLightMarkers;
   proto._bindEntityLightMarkers = function (...args) {
     const result = originalBindEntityMarkers.apply(this, args);
@@ -124,7 +109,7 @@ if (!proto.__ha3dTvWallFixV5) {
       this,
       PRINTER_ENTITY,
       this._hass?.states?.[PRINTER_ENTITY]?.attributes?.friendly_name || "Impressora 3D",
-      ["impressora 3d", "printer 3d", "printer"],
+      [PRINTER_ENTITY, "impressora 3d", "printer 3d", "printer"],
       "🖨️",
     );
 
@@ -132,17 +117,17 @@ if (!proto.__ha3dTvWallFixV5) {
       this,
       LAMP_ENTITY,
       this._hass?.states?.[LAMP_ENTITY]?.attributes?.friendly_name || "Abajur escritório",
-      ["abajur", "abajur escritorio"],
+      [LAMP_ENTITY, "abajur", "abajur escritorio"],
       "💡",
     );
 
-    const tvEntity = findEntity(this._hass, TV_ENTITIES);
-    if (tvEntity && !this._lightBindings?.has(tvEntity)) {
+    const tvMediaEntity = findEntity(this._hass, TV_MEDIA_ENTITIES);
+    if (tvMediaEntity && !this._lightBindings?.has(tvMediaEntity)) {
       makeHardMarker(
         this,
-        tvEntity,
-        this._hass?.states?.[tvEntity]?.attributes?.friendly_name || "TV da sala",
-        ["tv", "televisao", "television"],
+        tvMediaEntity,
+        this._hass?.states?.[tvMediaEntity]?.attributes?.friendly_name || "TV da sala",
+        [tvMediaEntity, "tv", "televisao", "television"],
         "📺",
       );
     }
@@ -153,43 +138,56 @@ if (!proto.__ha3dTvWallFixV5) {
     return result;
   };
 
+  // The pre-Astra frontend intentionally restored every unbound GLB light.
+  // That creates phantom illumination when HA says all physical lights are off.
+  // From now on only HA-bound model lights may emit; the global scene fill is
+  // separate and is not part of _modelLights.
+  proto._restoreUnboundModelLights = function () {
+    const boundLights = new Set(
+      [...(this._lightBindings?.values?.() || [])]
+        .map((binding) => binding.light)
+        .filter(Boolean),
+    );
+
+    for (const light of this._modelLights || []) {
+      if (boundLights.has(light)) continue;
+      light.intensity = 0;
+      light.castShadow = false;
+    }
+  };
+
   const originalSyncLightStates = proto._syncLightStates;
   proto._syncLightStates = function (...args) {
     const result = originalSyncLightStates.apply(this, args);
 
-    const tvEntity = findEntity(this._hass, TV_ENTITIES);
-    const binding = tvEntity ? this._lightBindings?.get(tvEntity) : null;
-    const state = tvEntity ? this._hass?.states?.[tvEntity] : null;
-    if (binding && state) {
-      const unavailable = ["unknown", "unavailable"].includes(state.state);
-      const on = !unavailable && ["on", "playing", "paused", "idle"].includes(state.state);
-      const brightness = Number.isFinite(Number(state.attributes?.brightness))
-        ? Number(state.attributes.brightness)
-        : 255;
+    // Make sure every HA-bound physical light has wall-blocking shadows when on.
+    for (const binding of this._lightBindings?.values?.() || []) {
+      if (!binding.light) continue;
+      const state = this._hass?.states?.[binding.entity];
+      if (!state) continue;
+      const on = state.state === "on" && !["unknown", "unavailable"].includes(state.state);
+      configurePhysicalShadow(binding.light, on);
+    }
 
-      if (binding.light) {
-        const base = Number(binding.light.userData?.ha3dBaseIntensity) > 0
-          ? binding.light.userData.ha3dBaseIntensity
-          : 40;
-        binding.light.intensity = on ? base * Math.max(0.05, brightness / 255) : 0;
-        binding.light.castShadow = on;
-        if (binding.light.shadow) {
-          binding.light.shadow.mapSize.set(512, 512);
-          binding.light.shadow.bias = -0.0005;
-          binding.light.shadow.normalBias = 0.02;
-          binding.light.shadow.camera.near = 0.02;
-          binding.light.shadow.camera.far = binding.light.distance || 4;
-          binding.light.shadow.camera.updateProjectionMatrix();
-          binding.light.shadow.needsUpdate = true;
-        }
+    // media_player TV is visual state only. It never drives the physical TV lamp.
+    const tvMediaEntity = findEntity(this._hass, TV_MEDIA_ENTITIES);
+    const tvBinding = tvMediaEntity ? this._lightBindings?.get(tvMediaEntity) : null;
+    const tvState = tvMediaEntity ? this._hass?.states?.[tvMediaEntity] : null;
+    if (tvBinding && tvState) {
+      const unavailable = ["unknown", "unavailable"].includes(tvState.state);
+      const active = !unavailable && ["on", "playing", "paused", "idle"].includes(tvState.state);
+      tvBinding.marker?.classList.toggle("on", active);
+      tvBinding.marker?.classList.toggle("unavailable", unavailable);
+      if (tvBinding.marker) {
+        tvBinding.marker.title = unavailable
+          ? `${tvBinding.name || "TV da sala"} — indisponível`
+          : tvBinding.name || "TV da sala";
       }
-
-      binding.marker?.classList.toggle("on", on);
-      binding.marker?.classList.toggle("unavailable", unavailable);
-      if (binding.marker) {
-        binding.marker.title = unavailable
-          ? `${binding.name || "TV da sala"} — indisponível`
-          : binding.name || "TV da sala";
+      // Defensive: a media_player marker must never own a GLB physical light.
+      if (tvBinding.light) {
+        tvBinding.light.intensity = 0;
+        tvBinding.light.castShadow = false;
+        tvBinding.light = null;
       }
     }
 
@@ -210,6 +208,8 @@ if (!proto.__ha3dTvWallFixV5) {
       }
     });
 
+    // Re-sync once after the wall occluders are prepared.
+    this._syncLightStates?.();
     this.setAttribute("data-ha3d-tv-fix", FIX_VERSION);
     return result;
   };
