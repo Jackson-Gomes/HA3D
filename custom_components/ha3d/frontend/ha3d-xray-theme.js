@@ -27,8 +27,6 @@ function idleAllowed(panel) {
 }
 
 function ensureState(panel) {
-  // X-Ray is no longer a manual persistent theme. It belongs only to the
-  // Cinematic idle animation.
   localStorage.removeItem("ha3d_xray_theme_v1");
 
   if (typeof panel._ha3dIdleActive !== "boolean") panel._ha3dIdleActive = false;
@@ -86,8 +84,6 @@ function ensureStyle(panel) {
     }
   `;
 
-  // Remove the old manual X-Ray control if a previous experimental build left
-  // one mounted in the current panel instance.
   panel.shadowRoot.querySelector("#xrayThemeButton")?.remove();
 }
 
@@ -199,12 +195,12 @@ function clearIdleAnimation(panel) {
 function armIdle(panel, wait = IDLE_MS) {
   ensureState(panel);
   clearIdleTimer(panel);
-  if (!panel._cinematicEnabled || !panel._model || panel._ha3dIdleActive) return;
+  if (!panel.isConnected || !panel._cinematicEnabled || !panel._model || panel._ha3dIdleActive) return;
 
   panel._ha3dIdleTimer = setTimeout(() => {
     panel._ha3dIdleTimer = 0;
     if (!idleAllowed(panel) || panel._cameraAnimating) {
-      if (panel._cinematicEnabled && !panel._ha3dIdleActive) armIdle(panel, 1800);
+      if (panel.isConnected && panel._cinematicEnabled && !panel._ha3dIdleActive) armIdle(panel, 1800);
       return;
     }
     enterIdle(panel);
@@ -358,8 +354,6 @@ async function exitIdleFromUser(panel) {
 function exitIdleForCinematic(panel) {
   if (!panel._ha3dIdleActive) return;
   panel._ha3dResumeIdleAfterCinematic = true;
-  // This swap happens before the existing Cinematic zoom starts, so the camera
-  // focuses the changed entity using the normal GLB materials.
   stopIdle(panel);
 }
 
@@ -456,7 +450,9 @@ if (!proto.__ha3dXrayIdleV2) {
     ) {
       this._ha3dResumeIdleAfterCinematic = false;
       clearIdleTimer(this);
-      this._ha3dIdleTimer = setTimeout(() => enterIdle(this), 650);
+      this._ha3dIdleTimer = setTimeout(() => {
+        if (this.isConnected) enterIdle(this);
+      }, 650);
     } else {
       armIdle(this);
     }
