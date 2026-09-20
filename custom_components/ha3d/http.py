@@ -145,5 +145,6 @@ class HA3DModelUploadView(HomeAssistantView):
                 "ok": True,
                 "bytes": total,
                 "model_url": data["model_url"],
+                "model_revision": data["model_revision"],
             }
         )
