@@ -363,7 +363,11 @@ class HA3DPanel extends HTMLElement {
   }
 
   _makeLightMarker(entity, name, anchor, light = null) {
-    if (this._lightBindings.has(entity)) return;
+    if (this._lightBindings.has(entity)) {
+      const binding = this._lightBindings.get(entity);
+      if (light && !binding.lights.includes(light)) binding.lights.push(light);
+      return binding;
+    }
     const marker = document.createElement("button");
     marker.type = "button";
     marker.className = "lightMarker";
@@ -374,14 +378,16 @@ class HA3DPanel extends HTMLElement {
       this._openNativeMoreInfo(entity);
     });
     this.shadowRoot.querySelector("#markers").appendChild(marker);
-    this._lightBindings.set(entity, { entity, name, anchor, light, marker });
+    const binding = { entity, name, anchor, light, lights: light ? [light] : [], marker };
+    this._lightBindings.set(entity, binding);
+    return binding;
   }
 
   _bindModelLights() {
     const counted = new Set(this._objectsByEntity.keys());
     for (const light of this._modelLights) {
       const map = this._mappingForLight(light);
-      if (!map || this._lightBindings.has(map.entity)) continue;
+      if (!map) continue;
       this._makeLightMarker(map.entity, map.name, light, light);
       if (!counted.has(map.entity)) {
         counted.add(map.entity);
@@ -401,7 +407,7 @@ class HA3DPanel extends HTMLElement {
 
   _restoreUnboundModelLights() {
     const boundLights = new Set(
-      [...this._lightBindings.values()].map((binding) => binding.light).filter(Boolean),
+      [...this._lightBindings.values()].flatMap((binding) => binding.lights || []).filter(Boolean),
     );
     for (const light of this._modelLights) {
       if (boundLights.has(light)) continue;
@@ -421,23 +427,23 @@ class HA3DPanel extends HTMLElement {
       const on = state.state === "on";
       const brightness = Number.isFinite(Number(attrs.brightness)) ? Number(attrs.brightness) : 255;
 
-      if (binding.light) {
-        const base = binding.light.userData.ha3dBaseIntensity || 1;
-        binding.light.intensity = on && !unavailable ? base * Math.max(0.05, brightness / 255) : 0;
+      for (const light of binding.lights || []) {
+        const base = light.userData.ha3dBaseIntensity || 1;
+        light.intensity = on && !unavailable ? base * Math.max(0.05, brightness / 255) : 0;
         const rgb = attrs.rgb_color;
         const hs = attrs.hs_color;
         if (Array.isArray(rgb) && rgb.length >= 3) {
-          binding.light.color.setRGB(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255, THREE.SRGBColorSpace);
+          light.color.setRGB(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255, THREE.SRGBColorSpace);
         } else if (Array.isArray(hs) && hs.length >= 2) {
-          binding.light.color.setHSL((((Number(hs[0]) % 360) + 360) % 360) / 360, Math.max(0, Math.min(100, Number(hs[1]))) / 100, 0.5);
+          light.color.setHSL((((Number(hs[0]) % 360) + 360) % 360) / 360, Math.max(0, Math.min(100, Number(hs[1]))) / 100, 0.5);
         } else {
-          binding.light.color.copy(binding.light.userData.ha3dOriginalColor || new THREE.Color(0xffffff));
+          light.color.copy(light.userData.ha3dOriginalColor || new THREE.Color(0xffffff));
         }
-        binding.light.castShadow = on && !unavailable;
-        if (binding.light.castShadow && binding.light.shadow) {
-          binding.light.shadow.mapSize.set(512, 512);
-          binding.light.shadow.bias = -0.0005;
-          binding.light.shadow.normalBias = 0.05;
+        light.castShadow = on && !unavailable;
+        if (light.castShadow && light.shadow) {
+          light.shadow.mapSize.set(512, 512);
+          light.shadow.bias = -0.0005;
+          light.shadow.normalBias = 0.05;
         }
       }
 
