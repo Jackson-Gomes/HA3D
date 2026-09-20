@@ -10,4 +10,4 @@ import "./ha3d-scene-icon.js?v=scene-icon-1";
 import "./ha3d-3d-printer-icon.js?v=3d-printer-icon-1";
 import "./ha3d-window-icons.js?v=window-icons-1";
 import "./ha3d-cinematic-off-v2.js?v=cinematic-off-2";
-import "./ha3d-marker-filter-bar.js?v=marker-filter-1";
+import "./ha3d-marker-filter-bar.js?v=marker-filter-2";
