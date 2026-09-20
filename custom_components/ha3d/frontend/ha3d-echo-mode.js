@@ -56,8 +56,6 @@ function rotatedTopView(panel) {
   const size = box.getSize(new THREE.Vector3());
   const max = Math.max(size.x, size.y, size.z) || 1;
 
-  // Same position as the proven Superior preset. Rotating camera.up by 90°
-  // turns the floor plan sideways so it uses a landscape Echo screen better.
   const az = THREE.MathUtils.degToRad(0);
   const el = THREE.MathUtils.degToRad(89);
   const r = max * 1.48;
@@ -153,10 +151,10 @@ function syncEchoUi(panel) {
 
 function installEchoButton(panel) {
   ensureEchoState(panel);
-  if (!panel.shadowRoot) return;
+  if (!panel?.shadowRoot) return false;
 
   const viewsPanel = panel.shadowRoot.querySelector("#viewsPanel");
-  if (!viewsPanel) return;
+  if (!viewsPanel) return false;
 
   if (!panel.shadowRoot.querySelector("#ha3dEchoModeStyle")) {
     const style = document.createElement("style");
@@ -185,6 +183,7 @@ function installEchoButton(panel) {
   }
 
   syncEchoUi(panel);
+  return true;
 }
 
 function setEchoMode(panel, enabled, persist = true, animate = false) {
@@ -227,8 +226,41 @@ function setEchoMode(panel, enabled, persist = true, animate = false) {
   syncEchoUi(panel);
 }
 
-if (!proto.__ha3dEchoModeV1) {
-  proto.__ha3dEchoModeV1 = true;
+function collectPanels(root, found = new Set()) {
+  if (!root?.querySelectorAll) return found;
+  for (const element of root.querySelectorAll("*")) {
+    if (element.localName === "ha3d-panel") found.add(element);
+    if (element.shadowRoot) collectPanels(element.shadowRoot, found);
+  }
+  return found;
+}
+
+function installOnExistingPanels() {
+  for (const panel of collectPanels(document)) {
+    installEchoButton(panel);
+    if (panel._ha3dEchoEnabled) {
+      applyRendererProfile(panel);
+      applyTextureProfile(panel);
+      const view = rotatedTopView(panel);
+      if (view) {
+        panel._defaultView = cloneView(view);
+        if (!panel._cameraAnimating) applyViewImmediate(panel, view);
+      }
+    }
+  }
+}
+
+if (!proto.__ha3dEchoModeV2) {
+  proto.__ha3dEchoModeV2 = true;
+
+  const originalConnected = proto.connectedCallback;
+  proto.connectedCallback = function (...args) {
+    ensureEchoState(this);
+    const result = originalConnected?.apply(this, args);
+    queueMicrotask(() => installEchoButton(this));
+    requestAnimationFrame(() => installEchoButton(this));
+    return result;
+  };
 
   const originalInitViewer = proto._initViewer;
   proto._initViewer = function (...args) {
@@ -259,6 +291,7 @@ if (!proto.__ha3dEchoModeV1) {
   proto._loadModel = async function (...args) {
     const result = await originalLoadModel?.apply(this, args);
     ensureEchoState(this);
+    installEchoButton(this);
     if (this._ha3dEchoEnabled) {
       applyRendererProfile(this);
       applyTextureProfile(this);
@@ -276,4 +309,9 @@ if (!proto.__ha3dEchoModeV1) {
     if (this._ha3dEchoEnabled) applyTextureProfile(this);
     return result;
   };
+
+  queueMicrotask(installOnExistingPanels);
+  requestAnimationFrame(installOnExistingPanels);
+  setTimeout(installOnExistingPanels, 250);
+  setTimeout(installOnExistingPanels, 1000);
 }
