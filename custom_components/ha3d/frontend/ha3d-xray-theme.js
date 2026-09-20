@@ -28,8 +28,8 @@ function ensureState(panel) {
     panel._ha3dXrayEdgeMaterial = new THREE.LineBasicMaterial({
       color: 0x4de7ff,
       transparent: true,
-      opacity: 0.92,
-      depthTest: true,
+      opacity: 0.82,
+      depthTest: false,
       depthWrite: false,
       toneMapped: false,
     });
@@ -102,6 +102,8 @@ function ensureMeshXray(panel, mesh) {
     state = {
       material: mesh.material,
       renderOrder: mesh.renderOrder,
+      castShadow: mesh.castShadow,
+      receiveShadow: mesh.receiveShadow,
       edge: null,
     };
     meshState.set(mesh, state);
@@ -133,15 +135,24 @@ function applyModel(panel, enabled) {
 
   model.traverse((object) => {
     if (!object.isMesh || object.userData?.ha3dXrayOverlay) return;
-    const state = ensureMeshXray(panel, object);
+
+    // Keep normal mode almost free: edge geometry is created only after the
+    // user enables X-Ray for the first time.
+    let state = meshState.get(object);
+    if (enabled) state = ensureMeshXray(panel, object);
+    else if (!state) return;
 
     if (enabled) {
       object.material = panel._ha3dXrayMaterial;
       object.renderOrder = 1;
+      object.castShadow = false;
+      object.receiveShadow = false;
       if (state.edge) state.edge.visible = true;
     } else {
       object.material = state.material;
       object.renderOrder = state.renderOrder;
+      object.castShadow = state.castShadow;
+      object.receiveShadow = state.receiveShadow;
       if (state.edge) state.edge.visible = false;
     }
   });
