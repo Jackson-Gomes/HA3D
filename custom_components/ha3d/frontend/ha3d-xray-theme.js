@@ -1,15 +1,41 @@
 import * as THREE from "https://esm.sh/three@0.180.0";
 
-const XRAY_KEY = "ha3d_xray_theme_v1";
+const IDLE_MS = 15000;
+const IDLE_ENTER_MS = 1800;
+const EXIT_HOLD_MS = 1000;
+const ORBIT_SPEED = 0.000025;
 const Panel = customElements.get("ha3d-panel");
 if (!Panel) throw new Error("HA3D panel was not registered");
 
 const proto = Panel.prototype;
 const meshState = new WeakMap();
 
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function idleAllowed(panel) {
+  return Boolean(
+    panel?.isConnected &&
+      panel._cinematicEnabled &&
+      panel._model &&
+      panel._camera &&
+      panel._controls &&
+      !panel._cinematicActive &&
+      !panel._ha3dIdleExitSequence,
+  );
+}
+
 function ensureState(panel) {
-  if (typeof panel._ha3dXrayEnabled !== "boolean") {
-    panel._ha3dXrayEnabled = localStorage.getItem(XRAY_KEY) === "1";
+  // X-Ray is no longer a manual persistent theme. It belongs only to the
+  // Cinematic idle animation.
+  localStorage.removeItem("ha3d_xray_theme_v1");
+
+  if (typeof panel._ha3dIdleActive !== "boolean") panel._ha3dIdleActive = false;
+  if (!panel._ha3dIdleTimer) panel._ha3dIdleTimer = 0;
+  if (!panel._ha3dIdleRaf) panel._ha3dIdleRaf = 0;
+  if (typeof panel._ha3dResumeIdleAfterCinematic !== "boolean") {
+    panel._ha3dResumeIdleAfterCinematic = false;
   }
 
   if (!panel._ha3dXrayMaterial) {
@@ -37,63 +63,32 @@ function ensureState(panel) {
 }
 
 function ensureStyle(panel) {
-  if (!panel.shadowRoot || panel.shadowRoot.querySelector("#ha3dXrayThemeStyle")) return;
-  const style = document.createElement("style");
-  style.id = "ha3dXrayThemeStyle";
-  style.textContent = `
-    #xrayThemeButton{
-      min-width:42px;
-      padding-left:12px;
-      padding-right:12px;
-      transition:background .18s ease,border-color .18s ease,box-shadow .18s ease,color .18s ease;
-    }
-    #xrayThemeButton.active{
-      color:#dffaff;
-      background:rgba(0,145,205,.72);
-      border-color:rgba(77,231,255,.88);
-      box-shadow:0 0 18px rgba(0,196,255,.38), inset 0 0 12px rgba(77,231,255,.10);
-    }
-  `;
-  panel.shadowRoot.appendChild(style);
-}
-
-function syncButton(panel) {
-  const button = panel.shadowRoot?.querySelector("#xrayThemeButton");
-  if (!button) return;
-  const enabled = Boolean(panel._ha3dXrayEnabled);
-  button.classList.toggle("active", enabled);
-  button.setAttribute("aria-pressed", enabled ? "true" : "false");
-  button.title = enabled ? "Desativar tema X-Ray" : "Ativar tema X-Ray";
-}
-
-function ensureButton(panel) {
-  const actions = panel.shadowRoot?.querySelector("#actions");
-  if (!actions) return false;
-
-  ensureState(panel);
-  ensureStyle(panel);
-
-  let button = panel.shadowRoot.querySelector("#xrayThemeButton");
-  if (!button) {
-    button = document.createElement("button");
-    button.id = "xrayThemeButton";
-    button.className = "secondary";
-    button.type = "button";
-    button.textContent = "◈";
-    button.setAttribute("aria-label", "Tema X-Ray");
-    button.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      setEnabled(panel, !panel._ha3dXrayEnabled);
-    });
-
-    const upload = panel.shadowRoot.querySelector("#uploadButton");
-    if (upload?.parentNode === actions) actions.insertBefore(button, upload);
-    else actions.appendChild(button);
+  if (!panel.shadowRoot) return;
+  let style = panel.shadowRoot.querySelector("#ha3dXrayThemeStyle");
+  if (!style) {
+    style = document.createElement("style");
+    style.id = "ha3dXrayThemeStyle";
+    panel.shadowRoot.appendChild(style);
   }
 
-  syncButton(panel);
-  return true;
+  style.textContent = `
+    #topbar,#viewsPanel,#meta,#markers,#markerFilterBar,#scenePrefixMenu{
+      transition:opacity .28s ease;
+    }
+    #root.ha3d-idle-xray #topbar,
+    #root.ha3d-idle-xray #viewsPanel,
+    #root.ha3d-idle-xray #meta,
+    #root.ha3d-idle-xray #markers,
+    #root.ha3d-idle-xray #markerFilterBar,
+    #root.ha3d-idle-xray #scenePrefixMenu{
+      opacity:0!important;
+      pointer-events:none!important;
+    }
+  `;
+
+  // Remove the old manual X-Ray control if a previous experimental build left
+  // one mounted in the current panel instance.
+  panel.shadowRoot.querySelector("#xrayThemeButton")?.remove();
 }
 
 function ensureMeshXray(panel, mesh) {
@@ -128,7 +123,7 @@ function ensureMeshXray(panel, mesh) {
   return state;
 }
 
-function applyModel(panel, enabled) {
+function applyModelXray(panel, enabled) {
   ensureState(panel);
   const model = panel._model;
   if (!model) return;
@@ -136,8 +131,6 @@ function applyModel(panel, enabled) {
   model.traverse((object) => {
     if (!object.isMesh || object.userData?.ha3dXrayOverlay) return;
 
-    // Keep normal mode almost free: edge geometry is created only after the
-    // user enables X-Ray for the first time.
     let state = meshState.get(object);
     if (enabled) state = ensureMeshXray(panel, object);
     else if (!state) return;
@@ -174,19 +167,9 @@ function applyBackground(panel, enabled) {
   }
 }
 
-function applyTheme(panel) {
-  ensureState(panel);
-  const enabled = Boolean(panel._ha3dXrayEnabled);
+function applyXray(panel, enabled) {
   applyBackground(panel, enabled);
-  applyModel(panel, enabled);
-  syncButton(panel);
-}
-
-function setEnabled(panel, enabled) {
-  ensureState(panel);
-  panel._ha3dXrayEnabled = Boolean(enabled);
-  localStorage.setItem(XRAY_KEY, panel._ha3dXrayEnabled ? "1" : "0");
-  applyTheme(panel);
+  applyModelXray(panel, enabled);
 }
 
 function disposeOldModel(model) {
@@ -203,6 +186,209 @@ function disposeOldModel(model) {
   }
 }
 
+function clearIdleTimer(panel) {
+  clearTimeout(panel._ha3dIdleTimer);
+  panel._ha3dIdleTimer = 0;
+}
+
+function clearIdleAnimation(panel) {
+  if (panel._ha3dIdleRaf) cancelAnimationFrame(panel._ha3dIdleRaf);
+  panel._ha3dIdleRaf = 0;
+}
+
+function armIdle(panel, wait = IDLE_MS) {
+  ensureState(panel);
+  clearIdleTimer(panel);
+  if (!panel._cinematicEnabled || !panel._model || panel._ha3dIdleActive) return;
+
+  panel._ha3dIdleTimer = setTimeout(() => {
+    panel._ha3dIdleTimer = 0;
+    if (!idleAllowed(panel) || panel._cameraAnimating) {
+      if (panel._cinematicEnabled && !panel._ha3dIdleActive) armIdle(panel, 1800);
+      return;
+    }
+    enterIdle(panel);
+  }, wait);
+}
+
+function idlePerspective(panel) {
+  const box = new THREE.Box3().setFromObject(panel._model);
+  const center = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3());
+  const max = Math.max(size.x, size.y, size.z, 1);
+  const direction = new THREE.Vector3(1.08, 0.78, 1.15).normalize();
+  const position = center.clone().add(direction.multiplyScalar(max * 1.62));
+  return { center, position, max };
+}
+
+function startIdleCamera(panel) {
+  const { center, position } = idlePerspective(panel);
+  const startPos = panel._camera.position.clone();
+  const startTarget = panel._controls.target.clone();
+  const startUp = panel._camera.up.clone();
+  const endUp = new THREE.Vector3(0, 1, 0);
+  const begun = performance.now();
+
+  panel._ha3dIdleOrbit = {
+    center,
+    radius: Math.max(0.001, Math.hypot(position.x - center.x, position.z - center.z)),
+    height: position.y - center.y,
+    angle: Math.atan2(position.z - center.z, position.x - center.x),
+    last: 0,
+  };
+
+  const frame = (now) => {
+    if (!panel._ha3dIdleActive) return;
+    const elapsed = now - begun;
+
+    if (elapsed < IDLE_ENTER_MS) {
+      const t0 = Math.max(0, Math.min(1, elapsed / IDLE_ENTER_MS));
+      const t = t0 * t0 * (3 - 2 * t0);
+      panel._camera.position.lerpVectors(startPos, position, t);
+      panel._controls.target.lerpVectors(startTarget, center, t);
+      panel._camera.up.copy(startUp).lerp(endUp, t).normalize();
+      panel._camera.lookAt(panel._controls.target);
+    } else {
+      const orbit = panel._ha3dIdleOrbit;
+      const delta = orbit.last ? Math.min(80, now - orbit.last) : 16;
+      orbit.last = now;
+      orbit.angle += delta * ORBIT_SPEED;
+
+      panel._camera.position.set(
+        orbit.center.x + Math.cos(orbit.angle) * orbit.radius,
+        orbit.center.y + orbit.height,
+        orbit.center.z + Math.sin(orbit.angle) * orbit.radius,
+      );
+      panel._controls.target.copy(orbit.center);
+      panel._camera.up.set(0, 1, 0);
+      panel._camera.lookAt(orbit.center);
+    }
+
+    panel._ha3dIdleRaf = requestAnimationFrame(frame);
+  };
+
+  panel._ha3dIdleRaf = requestAnimationFrame(frame);
+}
+
+function enterIdle(panel) {
+  ensureState(panel);
+  if (!idleAllowed(panel) || panel._cameraAnimating || panel._ha3dIdleActive) return false;
+
+  clearIdleTimer(panel);
+  clearIdleAnimation(panel);
+  panel._ha3dIdleActive = true;
+  panel._ha3dIdleControlsState = {
+    enabled: panel._controls.enabled,
+    damping: panel._controls.enableDamping,
+  };
+
+  panel._controls.enabled = false;
+  panel._controls.enableDamping = false;
+  panel._cameraAnimating = true;
+
+  panel.shadowRoot?.querySelector("#viewsPanel")?.classList.remove("open");
+  panel.shadowRoot?.querySelector("#scenePrefixMenu")?.classList.remove("open");
+  panel.shadowRoot?.querySelector("#root")?.classList.add("ha3d-idle-xray");
+
+  applyXray(panel, true);
+  startIdleCamera(panel);
+  return true;
+}
+
+function stopIdle(panel) {
+  ensureState(panel);
+  clearIdleTimer(panel);
+  clearIdleAnimation(panel);
+
+  if (!panel._ha3dIdleActive) {
+    applyXray(panel, false);
+    panel.shadowRoot?.querySelector("#root")?.classList.remove("ha3d-idle-xray");
+    return false;
+  }
+
+  panel._ha3dIdleActive = false;
+  panel.shadowRoot?.querySelector("#root")?.classList.remove("ha3d-idle-xray");
+  applyXray(panel, false);
+
+  const controlsState = panel._ha3dIdleControlsState;
+  if (panel._controls && controlsState) {
+    panel._controls.enabled = controlsState.enabled;
+    panel._controls.enableDamping = controlsState.damping;
+    panel._controls.update();
+  }
+  panel._ha3dIdleControlsState = null;
+  panel._ha3dIdleOrbit = null;
+  panel._cameraAnimating = false;
+  return true;
+}
+
+function waitForCamera(panel, timeoutMs = 8000) {
+  const started = performance.now();
+  return new Promise((resolve) => {
+    const poll = () => {
+      if (!panel._cameraAnimating || performance.now() - started >= timeoutMs) {
+        resolve();
+        return;
+      }
+      setTimeout(poll, 50);
+    };
+    poll();
+  });
+}
+
+async function exitIdleFromUser(panel) {
+  if (!panel._ha3dIdleActive || panel._ha3dIdleExitSequence) return;
+
+  panel._ha3dResumeIdleAfterCinematic = false;
+  stopIdle(panel);
+  panel._ha3dIdleExitSequence = true;
+
+  try {
+    panel._applyCameraView?.("top");
+    await waitForCamera(panel);
+    await delay(EXIT_HOLD_MS);
+    panel._applyCameraView?.("default");
+    await waitForCamera(panel);
+  } finally {
+    panel._ha3dIdleExitSequence = false;
+    armIdle(panel);
+  }
+}
+
+function exitIdleForCinematic(panel) {
+  if (!panel._ha3dIdleActive) return;
+  panel._ha3dResumeIdleAfterCinematic = true;
+  // This swap happens before the existing Cinematic zoom starts, so the camera
+  // focuses the changed entity using the normal GLB materials.
+  stopIdle(panel);
+}
+
+function installInteractionHooks(panel) {
+  const root = panel.shadowRoot?.querySelector("#root");
+  if (!root || root.__ha3dIdleXrayHooks) return;
+  root.__ha3dIdleXrayHooks = true;
+
+  const activity = (event) => {
+    if (panel._ha3dIdleActive) {
+      event.preventDefault?.();
+      event.stopImmediatePropagation?.();
+      exitIdleFromUser(panel);
+      return;
+    }
+    armIdle(panel);
+  };
+
+  root.addEventListener("pointerdown", activity, true);
+  root.addEventListener("wheel", activity, { capture: true, passive: false });
+}
+
+function install(panel) {
+  ensureState(panel);
+  ensureStyle(panel);
+  installInteractionHooks(panel);
+  armIdle(panel);
+}
+
 function collectPanels(root, found = new Set()) {
   if (!root?.querySelectorAll) return found;
   for (const element of root.querySelectorAll("*")) {
@@ -213,40 +399,67 @@ function collectPanels(root, found = new Set()) {
 }
 
 function installOnExistingPanels() {
-  for (const panel of collectPanels(document)) {
-    ensureState(panel);
-    ensureButton(panel);
-    applyTheme(panel);
-  }
+  for (const panel of collectPanels(document)) install(panel);
 }
 
-if (!proto.__ha3dXrayThemeV1) {
-  proto.__ha3dXrayThemeV1 = true;
+if (!proto.__ha3dXrayIdleV2) {
+  proto.__ha3dXrayIdleV2 = true;
 
   const originalConnectedCallback = proto.connectedCallback;
   proto.connectedCallback = function () {
     ensureState(this);
     originalConnectedCallback?.call(this);
-    queueMicrotask(() => {
-      ensureButton(this);
-      applyTheme(this);
-    });
+    queueMicrotask(() => install(this));
+  };
+
+  const originalDisconnectedCallback = proto.disconnectedCallback;
+  proto.disconnectedCallback = function () {
+    clearIdleTimer(this);
+    clearIdleAnimation(this);
+    stopIdle(this);
+    return originalDisconnectedCallback?.call(this);
   };
 
   const originalLoadModel = proto._loadModel;
   proto._loadModel = async function (...args) {
     const previousModel = this._model;
+    stopIdle(this);
     const result = await originalLoadModel.apply(this, args);
     if (previousModel && previousModel !== this._model) disposeOldModel(previousModel);
-    ensureButton(this);
-    applyTheme(this);
+    ensureStyle(this);
+    armIdle(this);
     return result;
   };
 
-  const originalInitViewer = proto._initViewer;
-  proto._initViewer = function (...args) {
-    const result = originalInitViewer?.apply(this, args);
-    applyBackground(this, Boolean(this._ha3dXrayEnabled));
+  const originalEnqueue = proto._enqueueCinematicBatch;
+  proto._enqueueCinematicBatch = function (...args) {
+    if (this._ha3dIdleActive) exitIdleForCinematic(this);
+    return originalEnqueue?.apply(this, args);
+  };
+
+  const originalRun = proto._runCinematicFocus;
+  proto._runCinematicFocus = function (...args) {
+    if (this._ha3dIdleActive) exitIdleForCinematic(this);
+    clearIdleTimer(this);
+    return originalRun?.apply(this, args);
+  };
+
+  const originalRestoreCinematicUi = proto._restoreCinematicUi;
+  proto._restoreCinematicUi = function (...args) {
+    const result = originalRestoreCinematicUi?.apply(this, args);
+
+    if (
+      this._ha3dResumeIdleAfterCinematic &&
+      this._cinematicEnabled &&
+      !this._cinematicActive &&
+      !(this._cinematicQueue?.length)
+    ) {
+      this._ha3dResumeIdleAfterCinematic = false;
+      clearIdleTimer(this);
+      this._ha3dIdleTimer = setTimeout(() => enterIdle(this), 650);
+    } else {
+      armIdle(this);
+    }
     return result;
   };
 
