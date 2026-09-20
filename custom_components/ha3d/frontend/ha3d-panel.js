@@ -333,8 +333,9 @@ class HA3DPanel extends HTMLElement {
     while (node && node !== this._model?.parent) {
       const name = node.name;
       if (name) {
-        const entityId = explicit[name] || (states[name]?.entity_id?.startsWith("light.") ? name : null);
-        if (entityId && states[entityId]?.entity_id?.startsWith("light.")) {
+        const lightNodeEntity = name.startsWith("LightNode_") ? name.slice("LightNode_".length) : null;
+        const entityId = explicit[name] || (states[name] ? name : null) || (lightNodeEntity && states[lightNodeEntity] ? lightNodeEntity : null);
+        if (entityId && states[entityId]) {
           return { entity: entityId, name: states[entityId].attributes?.friendly_name || entityId };
         }
       }
