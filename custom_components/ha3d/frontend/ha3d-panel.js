@@ -388,7 +388,13 @@ class HA3DPanel extends HTMLElement {
     for (const light of this._modelLights) {
       const map = this._mappingForLight(light);
       if (!map) continue;
-      this._makeLightMarker(map.entity, map.name, light, light);
+      const existing = this._lightBindings.get(map.entity);
+      if (existing) {
+        if (!existing.lights.includes(light)) existing.lights.push(light);
+        existing.light ||= light;
+      } else {
+        this._makeLightMarker(map.entity, map.name, light, light);
+      }
       if (!counted.has(map.entity)) {
         counted.add(map.entity);
         this._boundCount += 1;
