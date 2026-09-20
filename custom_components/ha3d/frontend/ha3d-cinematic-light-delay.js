@@ -1,4 +1,4 @@
-const LIGHT_ON_DELAY_MS = 1000;
+const LIGHT_ON_DELAY_MS = 3000;
 const START_POLL_MS = 40;
 const START_TIMEOUT_MS = 6000;
 
