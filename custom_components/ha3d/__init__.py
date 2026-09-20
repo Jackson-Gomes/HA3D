@@ -21,6 +21,9 @@ from .http import HA3DConfigView, HA3DModelUploadView
 from .storage import HA3DStore
 
 
+FRONTEND_VERSION = "0.1.10"
+
+
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Prepare HA3D shared runtime state."""
     hass.data.setdefault(DOMAIN, {})
@@ -52,7 +55,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             webcomponent_name=PANEL_ELEMENT,
             sidebar_title=PANEL_TITLE,
             sidebar_icon=PANEL_ICON,
-            module_url=f"{STATIC_URL}/ha3d-entry.js",
+            module_url=f"{STATIC_URL}/ha3d-entry.js?v={FRONTEND_VERSION}",
             embed_iframe=False,
             require_admin=False,
             handle_safe_area=True,
