@@ -32,8 +32,10 @@ function syncFilterButtons(panel) {
 
   const allNone = bar.querySelector('[data-marker-filter="allnone"]');
   if (allNone) {
-    allNone.textContent = mode === "all" ? "Nada" : "Tudo";
-    allNone.title = mode === "all" ? "Ocultar todos os marcadores" : "Mostrar todos os marcadores";
+    const showAllAction = mode !== "all";
+    allNone.textContent = showAllAction ? "◉" : "○";
+    allNone.title = showAllAction ? "Mostrar todos os marcadores" : "Ocultar todos os marcadores";
+    allNone.setAttribute("aria-label", allNone.title);
   }
 }
 
@@ -88,15 +90,19 @@ function installFilterBar(panel) {
       transition:opacity .22s ease;
     }
     .markerFilterButton{
-      min-height:34px;
-      padding:7px 11px;
+      width:40px;
+      height:36px;
+      min-height:36px;
+      padding:0;
+      display:grid;
+      place-items:center;
       border-radius:11px;
       border:1px solid transparent;
       background:transparent;
       color:var(--primary-text-color,#fff);
-      font-size:12px;
+      font-size:19px;
+      line-height:1;
       font-weight:650;
-      white-space:nowrap;
       box-shadow:none;
     }
     .markerFilterButton:hover{background:rgba(255,255,255,.08)}
@@ -107,7 +113,7 @@ function installFilterBar(panel) {
     #root.ha3d-cinematic-active #markerFilterBar{opacity:0;pointer-events:none}
     @media(max-width:600px){
       #markerFilterBar{bottom:max(9px,env(safe-area-inset-bottom));gap:3px;padding:4px}
-      .markerFilterButton{padding:7px 9px;font-size:11px}
+      .markerFilterButton{width:38px;height:34px;min-height:34px;font-size:18px}
     }
   `;
   panel.shadowRoot.appendChild(style);
@@ -118,9 +124,9 @@ function installFilterBar(panel) {
   bar.setAttribute("role", "toolbar");
   bar.setAttribute("aria-label", "Filtros de marcadores");
   bar.innerHTML = `
-    <button class="markerFilterButton" data-marker-filter="lights" type="button">💡 Lâmpadas</button>
-    <button class="markerFilterButton" data-marker-filter="devices" type="button">Aparelhos</button>
-    <button class="markerFilterButton" data-marker-filter="allnone" type="button">Nada</button>
+    <button class="markerFilterButton" data-marker-filter="lights" type="button" title="Lâmpadas" aria-label="Lâmpadas">💡</button>
+    <button class="markerFilterButton" data-marker-filter="devices" type="button" title="Aparelhos" aria-label="Aparelhos">🔌</button>
+    <button class="markerFilterButton" data-marker-filter="allnone" type="button" title="Ocultar todos os marcadores" aria-label="Ocultar todos os marcadores">○</button>
   `;
 
   bar.addEventListener("click", (event) => {
