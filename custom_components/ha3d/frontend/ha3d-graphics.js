@@ -1,5 +1,5 @@
 import * as THREE from "https://esm.sh/three@0.180.0";
-import "./ha3d-ui.js?v=20260919-3";
+import "./ha3d-ui.js";
 
 const GRAPHICS_QUALITY_KEY = "ha3d_texture_quality_pct_v1";
 const Panel = customElements.get("ha3d-panel");

@@ -81,14 +81,12 @@ function kelvinToColor(kelvin) {
 }
 
 function getSceneFrame(panel) {
-  if (panel._ha3dSceneFrame?.model === panel._model) return panel._ha3dSceneFrame;
   if (panel._model) {
     const box = new THREE.Box3().setFromObject(panel._model);
     if (!box.isEmpty()) {
       const center = box.getCenter(new THREE.Vector3());
       const size = box.getSize(new THREE.Vector3());
-      return panel._ha3dSceneFrame = {
-        model: panel._model,
+      return {
         center,
         scale: Math.max(size.x, size.y, size.z, 1),
       };
@@ -158,17 +156,35 @@ if (!proto.__ha3dSceneLightTunedV4) {
     return result;
   };
 
+  const originalRestoreUnboundModelLights = proto._restoreUnboundModelLights;
+  proto._restoreUnboundModelLights = function (...args) {
+    const result = originalRestoreUnboundModelLights.apply(this, args);
+
+    const boundLights = new Set(
+      [...(this._lightBindings?.values?.() || [])]
+        .map((binding) => binding.light)
+        .filter(Boolean),
+    );
+
+    for (const light of this._modelLights || []) {
+      if (boundLights.has(light)) continue;
+      if (!Number.isFinite(light.userData?.ha3dFillBaseIntensity)) {
+        light.userData.ha3dFillBaseIntensity = light.intensity || 0;
+      }
+      light.intensity = light.userData.ha3dFillBaseIntensity * 0.30;
+      light.castShadow = false;
+    }
+
+    return result;
+  };
+
   proto._ensureGlobalDirectionalLight = function () {
     if (!this._scene) return null;
     if (this._ha3dGlobalDirectional?.parent === this._scene) return this._ha3dGlobalDirectional;
 
     const light = new THREE.DirectionalLight(0xffffff, 0);
     light.name = "HA3D_GlobalDirectional";
-    light.castShadow = true;
-    light.shadow.mapSize.set(512, 512);
-    light.shadow.bias = -0.0001;
-    light.shadow.normalBias = 0.01;
-    light.shadow.autoUpdate = false;
+    light.castShadow = false;
 
     const target = new THREE.Object3D();
     target.name = "HA3D_GlobalDirectionalTarget";
@@ -217,17 +233,6 @@ if (!proto.__ha3dSceneLightTunedV4) {
       directional.intensity = 0.55 * (pct / 100);
 
       const { center, scale } = getSceneFrame(this);
-      const shadowKey = `${scale}:${center.x}:${center.y}:${center.z}:${pos.x}:${pos.y}:${pos.z}`;
-      if (this._ha3dGlobalShadowKey !== shadowKey || this._ha3dGlobalShadowModel !== this._model) {
-        this._ha3dGlobalShadowKey = shadowKey;
-        this._ha3dGlobalShadowModel = this._model;
-        Object.assign(directional.shadow.camera, {
-          left: -scale, right: scale, top: scale, bottom: -scale,
-          near: 0.02, far: scale * 4,
-        });
-        directional.shadow.camera.updateProjectionMatrix();
-        directional.shadow.needsUpdate = true;
-      }
       const x = clamp(pos.x, -100, 100) / 100;
       const y = clamp(pos.y, -100, 100) / 100;
       const z = clamp(pos.z, -100, 100) / 100;
