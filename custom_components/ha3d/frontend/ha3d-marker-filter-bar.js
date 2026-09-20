@@ -58,7 +58,13 @@ function setFilterMode(panel, mode) {
 
 function installFilterBar(panel) {
   const root = panel.shadowRoot?.querySelector("#root");
-  if (!root || panel.shadowRoot.querySelector("#markerFilterBar")) return;
+  if (!root) return false;
+
+  let bar = panel.shadowRoot.querySelector("#markerFilterBar");
+  if (bar) {
+    applyMarkerFilter(panel);
+    return true;
+  }
 
   const style = document.createElement("style");
   style.textContent = `
@@ -67,7 +73,7 @@ function installFilterBar(panel) {
       left:50%;
       bottom:max(14px,env(safe-area-inset-bottom));
       transform:translateX(-50%);
-      z-index:24;
+      z-index:31;
       display:flex;
       align-items:center;
       gap:6px;
@@ -106,8 +112,9 @@ function installFilterBar(panel) {
   `;
   panel.shadowRoot.appendChild(style);
 
-  const bar = document.createElement("div");
+  bar = document.createElement("div");
   bar.id = "markerFilterBar";
+  bar.className = "glass";
   bar.setAttribute("role", "toolbar");
   bar.setAttribute("aria-label", "Filtros de marcadores");
   bar.innerHTML = `
@@ -130,12 +137,31 @@ function installFilterBar(panel) {
     setFilterMode(panel, filter);
   });
 
+  // Same overlay layer as the existing Vistas controls, but anchored at bottom.
   root.appendChild(bar);
   applyMarkerFilter(panel);
+  return true;
 }
 
-if (!proto.__ha3dMarkerFilterBarV1) {
-  proto.__ha3dMarkerFilterBarV1 = true;
+function collectHa3dPanels(root, found = new Set()) {
+  if (!root?.querySelectorAll) return found;
+  for (const element of root.querySelectorAll("*")) {
+    if (element.localName === "ha3d-panel") found.add(element);
+    if (element.shadowRoot) collectHa3dPanels(element.shadowRoot, found);
+  }
+  return found;
+}
+
+function installOnExistingPanels() {
+  for (const panel of collectHa3dPanels(document)) {
+    ensureFilterState(panel);
+    installFilterBar(panel);
+    applyMarkerFilter(panel);
+  }
+}
+
+if (!proto.__ha3dMarkerFilterBarV2) {
+  proto.__ha3dMarkerFilterBarV2 = true;
 
   const originalConnectedCallback = proto.connectedCallback;
   proto.connectedCallback = function () {
@@ -175,4 +201,13 @@ if (!proto.__ha3dMarkerFilterBarV1) {
     applyMarkerFilter(this);
     return result;
   };
+
+  // ha3d-panel can be upgraded before this late-loaded module executes.
+  // Search through Home Assistant's open shadow roots and install on the
+  // already-connected panel instance as well as future instances.
+  queueMicrotask(installOnExistingPanels);
+  requestAnimationFrame(installOnExistingPanels);
+  setTimeout(installOnExistingPanels, 250);
+  setTimeout(installOnExistingPanels, 1000);
+  setTimeout(installOnExistingPanels, 2500);
 }
