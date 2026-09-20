@@ -8,6 +8,45 @@ function originalName(object) {
   return object?.userData?.ha3dOriginalNodeName || object?.name || "";
 }
 
+function iconForEntity(entity) {
+  const [domain, objectId = ""] = String(entity || "").toLowerCase().split(".", 2);
+
+  if (domain === "light") return "💡";
+
+  if (domain === "media_player") {
+    if (/(xbox|playstation|console|game|gaming)/.test(objectId)) return "🎮";
+    if (/(alexa|echo|speaker|som|audio)/.test(objectId)) return "🔊";
+    if (/(tv|televis|television)/.test(objectId)) return "📺";
+    return "▶️";
+  }
+
+  if (domain === "switch") {
+    if (/(impressora|printer)/.test(objectId)) return "🖨️";
+    if (/(xbox|playstation|console|game|gaming)/.test(objectId)) return "🎮";
+    return "🔌";
+  }
+
+  const domainIcons = {
+    vacuum: "🤖",
+    climate: "❄️",
+    camera: "📷",
+    binary_sensor: "📡",
+    sensor: "📊",
+    lock: "🔒",
+    cover: "🪟",
+    fan: "🌀",
+    button: "🔘",
+    script: "▶️",
+    automation: "⚙️",
+    device_tracker: "📍",
+    person: "👤",
+    weather: "🌤️",
+    alarm_control_panel: "🚨",
+  };
+
+  return domainIcons[domain] || "🔘";
+}
+
 function rememberOriginalNames(gltf) {
   gltf?.scene?.traverse((object) => {
     const association = gltf.parser?.associations?.get(object);
@@ -67,22 +106,27 @@ if (!proto.__ha3dExactEntityMarkersV1) {
     this._boundCount = this._objectsByEntity.size;
   };
 
-  // Reuse the proven circular lamp marker for every exact entity match for now.
-  // Domain-specific icons will be added later, after this binding layer is
-  // validated on the real GLB.
+  // Reuse the proven circular marker, changing only the emoji according to the
+  // entity domain. Specific device names refine media_player/switch where useful.
   const originalBindMarkers = proto._bindEntityLightMarkers;
   proto._bindEntityLightMarkers = function (...args) {
     const result = originalBindMarkers.apply(this, args);
     const states = this._hass?.states || {};
 
     for (const [entity, objects] of this._objectsByEntity.entries()) {
-      if (!states[entity] || !objects.length || this._lightBindings.has(entity)) continue;
-      this._makeLightMarker(
-        entity,
-        states[entity].attributes?.friendly_name || entity,
-        objects[0],
-        null,
-      );
+      if (!states[entity] || !objects.length) continue;
+
+      if (!this._lightBindings.has(entity)) {
+        this._makeLightMarker(
+          entity,
+          states[entity].attributes?.friendly_name || entity,
+          objects[0],
+          null,
+        );
+      }
+
+      const binding = this._lightBindings.get(entity);
+      if (binding?.marker) binding.marker.textContent = iconForEntity(entity);
     }
 
     this._boundCount = this._lightBindings.size;
