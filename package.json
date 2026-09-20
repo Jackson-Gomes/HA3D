@@ -3,6 +3,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "node --check custom_components/ha3d/frontend/ha3d-panel.js"
+    "check": "node tests/check.mjs",
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "three": "0.180.0"
   }
 }

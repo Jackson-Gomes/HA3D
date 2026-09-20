@@ -1,30 +1,11 @@
 import * as THREE from "https://esm.sh/three@0.180.0";
 import { OrbitControls } from "https://esm.sh/three@0.180.0/examples/jsm/controls/OrbitControls.js";
 import { GLTFLoader } from "https://esm.sh/three@0.180.0/examples/jsm/loaders/GLTFLoader.js";
+import { FRONTEND_VERSION, entityIdFromName, restoreNodeNames, indexCandidates, visualState, iconFor } from "./ha3d-bindings.js?v=20260919-3";
+import { prepareLight, prepareOccluders, applyShadowBudget } from "./ha3d-lighting.js?v=20260919-3";
 
 const LIGHT_INTENSITY_SCALE = 0.40;
 const CUSTOM_VIEWS_KEY = "ha3d_custom_views_v1";
-
-// Compatibility fallback for the original APT0307 GLB.
-// Generic models should prefer exact entity_id node names or explicit bindings.
-const LEGACY_LIGHTS = [
-  { entity: "light.luz_da_sala", match: ["sala"], name: "Luz da Sala" },
-  { entity: "light.luz_do_corredor", match: ["corredor"], name: "Luz do corredor" },
-  { entity: "light.luz_do_quarto_do_joca", match: ["joca"], name: "Luz do quarto do Joca" },
-  { entity: "light.luz_do_escritorio", match: ["escritorio", "escritório"], name: "Luz do escritório" },
-  { entity: "light.luz_do_quarto", match: ["quarto"], exclude: ["joca"], name: "Luz do Quarto" },
-  { entity: "light.luz_da_tv", match: ["tv"], name: "Luz da TV" },
-  { entity: "light.escritorio_tomada_escritorio_socket_1", match: ["abajur"], name: "Abajur escritório" },
-];
-
-function normalizeName(value) {
-  return (value || "")
-    .replace(/^LightNode_/, "")
-    .replaceAll("_", " ")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase();
-}
 
 function ease(t) {
   const x = Math.max(0, Math.min(1, t));
@@ -42,6 +23,8 @@ class HA3DPanel extends HTMLElement {
     this._modelLights = [];
     this._objectsByEntity = new Map();
     this._lightBindings = new Map();
+    this._pendingBindings = new Map();
+    this._markerPoint = new THREE.Vector3();
     this._boundCount = 0;
     this._raycaster = new THREE.Raycaster();
     this._pointer = new THREE.Vector2();
@@ -55,7 +38,12 @@ class HA3DPanel extends HTMLElement {
     this._hass = value;
     if (this.isConnected) {
       this._updateAdminUi();
+      this._resolvePendingBindings();
       this._syncLightStates();
+      if (value && this._waitingForHass) {
+        this._waitingForHass = false;
+        this._loadConfig();
+      }
     }
   }
 
@@ -105,6 +93,7 @@ class HA3DPanel extends HTMLElement {
         #markers{position:absolute;inset:0;z-index:12;pointer-events:none}
         .lightMarker{position:absolute;width:34px;height:34px;min-height:34px;padding:0;border-radius:50%;transform:translate(-50%,-50%);font-size:18px;background:#202020e8;border:1px solid #666;color:#bbb;box-shadow:0 3px 12px #0008;backdrop-filter:blur(6px);pointer-events:auto}
         .lightMarker.on{background:#f3c94be8;border-color:#ffe993;color:#111;box-shadow:0 0 14px #ffd84f99}.lightMarker.unavailable{border-color:#a34b42;color:#ffb1a8}
+        .lightMarker{display:grid;place-items:center}.lightMarker ha-icon{--mdc-icon-size:20px;width:20px;height:20px;pointer-events:none}.lightMarker.assumed{border-style:dashed}.lightMarker:hover,.lightMarker:focus-visible{outline:2px solid #fff;outline-offset:2px}
         #viewsPanel{display:none;position:absolute;top:max(66px,calc(env(safe-area-inset-top) + 58px));right:max(12px,env(safe-area-inset-right));z-index:30;width:min(320px,calc(100vw - 24px));padding:12px;border-radius:16px}
         #viewsPanel.open{display:block}.viewsTitle{font-size:14px;font-weight:700;margin:1px 2px 10px}.viewGrid{display:grid;grid-template-columns:1fr 1fr;gap:7px}.viewGrid button{background:#24262c;font-size:12px;min-height:38px;padding:7px 8px}.saveView{width:100%;margin-top:9px;background:#18304a}.customViews{display:grid;gap:7px;margin-top:9px}.customRow{display:grid;grid-template-columns:1fr auto;gap:6px}.customRow button:first-child{text-align:left;background:#24262c;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.customRow button:last-child{width:40px;padding:0;background:#3a2424}
         #meta{position:absolute;right:max(12px,env(safe-area-inset-right));bottom:max(12px,env(safe-area-inset-bottom));z-index:15;padding:8px 10px;border-radius:12px;font-size:11px;opacity:.75;pointer-events:none}
@@ -207,8 +196,8 @@ class HA3DPanel extends HTMLElement {
   }
 
   async _waitForHassAndLoad() {
-    for (let i = 0; i < 100 && !this._hass; i += 1) await new Promise((resolve) => setTimeout(resolve, 50));
     if (!this._hass) {
+      this._waitingForHass = true;
       this._setStatus("Home Assistant indisponível");
       return;
     }
@@ -258,20 +247,18 @@ class HA3DPanel extends HTMLElement {
   async _loadModel(url) {
     this._setStatus("Carregando modelo 3D…");
     const gltf = await this._loader.loadAsync(url);
-    if (this._model) this._scene.remove(this._model);
+    if (this._model) {
+      this._scene.remove(this._model);
+      this._disposeModel();
+    }
     this._clearMarkers();
 
     this._model = gltf.scene;
+    restoreNodeNames(gltf);
     this._collectModelLights(this._model);
     this._scene.add(this._model);
 
-    // Preserve every exported GLB material and texture.
-    this._model.traverse((object) => {
-      if (object.isMesh) {
-        object.castShadow = true;
-        object.receiveShadow = true;
-      }
-    });
+    prepareOccluders(this._model);
 
     this._indexBindings();
     this._fit(this._model);
@@ -281,7 +268,27 @@ class HA3DPanel extends HTMLElement {
     this._syncLightStates();
 
     this._showEmpty(false);
-    this._setStatus(`Pronto · ${this._boundCount} vínculos · ${this._modelLights.length} luzes 3D`);
+    this._setStatus(`Pronto · ${FRONTEND_VERSION} · ${this._boundCount} vínculos`);
+    this.setAttribute("data-ha3d-version", FRONTEND_VERSION);
+  }
+
+  _disposeModel() {
+    const resources = new Set();
+    for (const group of this._graphicsTextureGroups || []) {
+      for (const slot of group.slots) resources.add(slot.texture);
+    }
+    this._model?.traverse((object) => {
+      if (object.geometry) resources.add(object.geometry);
+      object.shadow?.dispose();
+      const materials = Array.isArray(object.material) ? object.material : [object.material];
+      for (const material of materials) {
+        if (!material) continue;
+        resources.add(material);
+        for (const value of Object.values(material)) if (value?.isTexture) resources.add(value);
+      }
+    });
+    for (const resource of resources) resource.dispose();
+    this._graphicsTextureGroups = [];
   }
 
   _collectModelLights(object) {
@@ -289,7 +296,7 @@ class HA3DPanel extends HTMLElement {
     object.traverse((light) => {
       if (!light.isLight) return;
       const originalIntensity = Number(light.intensity || 0);
-      light.userData.ha3dBaseIntensity = Math.max(0, originalIntensity * LIGHT_INTENSITY_SCALE) || 40;
+      light.userData.ha3dBaseIntensity = Math.max(0, originalIntensity * LIGHT_INTENSITY_SCALE);
       light.userData.ha3dOriginalIntensity = originalIntensity;
       light.userData.ha3dOriginalColor = light.color?.clone?.() || new THREE.Color(0xffffff);
       light.userData.ha3dOriginalCastShadow = Boolean(light.castShadow);
@@ -302,149 +309,114 @@ class HA3DPanel extends HTMLElement {
 
   _indexBindings() {
     this._objectsByEntity.clear();
-    this._boundCount = 0;
-    const explicit = this._config?.bindings || {};
-    const autoBind = this._config?.auto_bind !== false;
-    const states = this._hass?.states || {};
-
-    this._model?.traverse((object) => {
-      if (!object.name) return;
-      const entityId = explicit[object.name] || (autoBind && states[object.name] ? object.name : null);
-      if (!entityId || !states[entityId]) return;
-      object.userData.ha3dEntityId = entityId;
-      if (!this._objectsByEntity.has(entityId)) {
-        this._objectsByEntity.set(entityId, []);
-        this._boundCount += 1;
-      }
-      this._objectsByEntity.get(entityId).push(object);
-    });
-  }
-
-  _directLightMapping(light) {
-    const states = this._hass?.states || {};
-    const explicit = this._config?.bindings || {};
-    let node = light;
-    while (node && node !== this._model?.parent) {
-      const name = node.name;
-      if (name) {
-        const entityId = explicit[name] || (states[name]?.entity_id?.startsWith("light.") ? name : null);
-        if (entityId && states[entityId]?.entity_id?.startsWith("light.")) {
-          return { entity: entityId, name: states[entityId].attributes?.friendly_name || entityId };
-        }
-      }
-      if (node === this._model) break;
-      node = node.parent;
+    this._pendingBindings = indexCandidates(this._model, this._config || {});
+    // Entity-named lights stay dark while HA is still resolving the entity.
+    for (const light of this._modelLights) {
+      light.userData.ha3dDesiredIntensity = light.userData.ha3dCandidate
+        ? 0 : light.userData.ha3dBaseIntensity * 0.3;
     }
-    return null;
   }
 
-  _mappingForLight(light) {
-    const direct = this._directLightMapping(light);
-    if (direct) return direct;
-
-    const states = this._hass?.states || {};
-    const name = normalizeName(light.name);
-
-    // Scene/global lights are visual lighting, not Home Assistant entities.
-    if (/(global|geral|ambient|ambiente|world|mundo|sun|sol)/.test(name)) return null;
-
-    for (const map of LEGACY_LIGHTS) {
-      const matches = map.match.some((token) => name.includes(normalizeName(token)));
-      const excluded = (map.exclude || []).some((token) => name.includes(normalizeName(token)));
-      if (matches && !excluded && states[map.entity]) return map;
+  _resolvePendingBindings() {
+    if (!this._model || !this._hass) return;
+    for (const [entity, candidate] of this._pendingBindings) {
+      const state = this._hass.states?.[entity];
+      if (!state) continue;
+      const marker = document.createElement("button");
+      marker.type = "button";
+      marker.className = "lightMarker";
+      const icon = document.createElement("ha-icon");
+      icon.setAttribute("aria-hidden", "true");
+      marker.appendChild(icon);
+      marker.addEventListener("click", (event) => {
+        event.stopPropagation();
+        this._openNativeMoreInfo(entity);
+      });
+      this.shadowRoot.querySelector("#markers").appendChild(marker);
+      const binding = { ...candidate, marker, icon, light: null };
+      binding.lights = candidate.lights.map((original) => {
+        const light = prepareLight(original, state, candidate.metadata);
+        const index = this._modelLights.indexOf(original);
+        if (index !== -1) this._modelLights[index] = light;
+        if (binding.anchor === original) binding.anchor = light;
+        return light;
+      });
+      binding.light = binding.lights[0] || null; // cinematic compatibility
+      for (const object of candidate.objects) object.userData.ha3dEntityId = entity;
+      this._objectsByEntity.set(entity, candidate.objects);
+      this._lightBindings.set(entity, binding);
+      this._pendingBindings.delete(entity);
     }
-    return null;
-  }
-
-  _makeLightMarker(entity, name, anchor, light = null) {
-    if (this._lightBindings.has(entity)) return;
-    const marker = document.createElement("button");
-    marker.type = "button";
-    marker.className = "lightMarker";
-    marker.textContent = "💡";
-    marker.title = name;
-    marker.addEventListener("click", (event) => {
-      event.stopPropagation();
-      this._openNativeMoreInfo(entity);
-    });
-    this.shadowRoot.querySelector("#markers").appendChild(marker);
-    this._lightBindings.set(entity, { entity, name, anchor, light, marker });
+    this._boundCount = this._lightBindings.size;
   }
 
   _bindModelLights() {
-    const counted = new Set(this._objectsByEntity.keys());
-    for (const light of this._modelLights) {
-      const map = this._mappingForLight(light);
-      if (!map || this._lightBindings.has(map.entity)) continue;
-      this._makeLightMarker(map.entity, map.name, light, light);
-      if (!counted.has(map.entity)) {
-        counted.add(map.entity);
-        this._boundCount += 1;
-      }
-    }
+    this._resolvePendingBindings();
   }
 
   _bindEntityLightMarkers() {
-    const states = this._hass?.states || {};
-    for (const [entity, objects] of this._objectsByEntity.entries()) {
-      if (!entity.startsWith("light.") || this._lightBindings.has(entity) || !objects.length) continue;
-      this._makeLightMarker(entity, states[entity]?.attributes?.friendly_name || entity, objects[0], null);
-    }
-    this.shadowRoot.querySelector("#meta").textContent = `${this._boundCount} vínculos`;
+    // All domains are resolved together; no duplicate marker for LightNode_.
   }
 
   _restoreUnboundModelLights() {
-    const boundLights = new Set(
-      [...this._lightBindings.values()].map((binding) => binding.light).filter(Boolean),
-    );
-    for (const light of this._modelLights) {
-      if (boundLights.has(light)) continue;
-      light.intensity = light.userData.ha3dBaseIntensity || 0;
-      light.color.copy(light.userData.ha3dOriginalColor || new THREE.Color(0xffffff));
-      light.castShadow = Boolean(light.userData.ha3dOriginalCastShadow);
-    }
+    this._modelLights = this._modelLights.map((light) =>
+      light.userData.ha3dCandidate ? light : prepareLight(light, null));
   }
 
   _syncLightStates() {
-    if (!this._hass || !this._lightBindings.size) return;
     for (const binding of this._lightBindings.values()) {
-      const state = this._hass.states?.[binding.entity];
-      if (!state) continue;
-      const attrs = state.attributes || {};
-      const unavailable = state.state === "unavailable" || state.state === "unknown";
-      const on = state.state === "on";
-      const brightness = Number.isFinite(Number(attrs.brightness)) ? Number(attrs.brightness) : 255;
-
-      if (binding.light) {
-        const base = binding.light.userData.ha3dBaseIntensity || 1;
-        binding.light.intensity = on && !unavailable ? base * Math.max(0.05, brightness / 255) : 0;
-        const rgb = attrs.rgb_color;
-        const hs = attrs.hs_color;
-        if (Array.isArray(rgb) && rgb.length >= 3) {
-          binding.light.color.setRGB(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255, THREE.SRGBColorSpace);
-        } else if (Array.isArray(hs) && hs.length >= 2) {
-          binding.light.color.setHSL((((Number(hs[0]) % 360) + 360) % 360) / 360, Math.max(0, Math.min(100, Number(hs[1]))) / 100, 0.5);
-        } else {
-          binding.light.color.copy(binding.light.userData.ha3dOriginalColor || new THREE.Color(0xffffff));
-        }
-        binding.light.castShadow = on && !unavailable;
-        if (binding.light.castShadow && binding.light.shadow) {
-          binding.light.shadow.mapSize.set(512, 512);
-          binding.light.shadow.bias = -0.0005;
-          binding.light.shadow.normalBias = 0.05;
-        }
+      const state = this._hass?.states?.[binding.entity];
+      const sourceEntity = entityIdFromName(binding.metadata.state_entity) || binding.entity;
+      const source = this._hass?.states?.[sourceEntity];
+      const visual = visualState(binding.entity, state);
+      const physical = visualState(sourceEntity, source);
+      // HA publishes immutable state objects. Only changed entities touch DOM.
+      if (binding.lastState !== state || binding.lastSource !== source || !binding.synced) {
+        binding.lastState = state;
+        binding.lastSource = source;
+        binding.synced = true;
+        binding.name = state?.attributes?.friendly_name || binding.entity;
+        binding.icon.setAttribute("icon", iconFor(binding.entity, state));
+        binding.marker.classList.toggle("on", visual.on && !visual.unavailable);
+        binding.marker.classList.toggle("unavailable", visual.unavailable);
+        binding.marker.classList.toggle("assumed", visual.assumed);
+        binding.marker.title = binding.name + (visual.unavailable ? " — indisponível" : visual.assumed ? " — estado presumido" : "");
+        binding.marker.setAttribute("aria-label", binding.marker.title);
+        binding.marker.dataset.state = state?.state || "unavailable";
+        // Metadata can arrive after a minimal initial state. Convert once then.
+        binding.lights = binding.lights.map((original) => {
+          const light = prepareLight(original, state, binding.metadata);
+          if (light !== original) {
+            this._modelLights[this._modelLights.indexOf(original)] = light;
+            if (binding.anchor === original) binding.anchor = light;
+          }
+          const attrs = source?.attributes || {};
+          light.userData.ha3dDesiredIntensity = physical.emits && !visual.unavailable
+            ? light.userData.ha3dBaseIntensity * physical.level : 0;
+          const rgb = attrs.rgb_color;
+          const hs = attrs.hs_color;
+          if (Array.isArray(rgb) && rgb.length >= 3 && rgb.every(Number.isFinite)) {
+            light.color.setRGB(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255, THREE.SRGBColorSpace);
+          } else if (Array.isArray(hs) && hs.length >= 2 && hs.every(Number.isFinite)) {
+            light.color.setHSL((((hs[0] % 360) + 360) % 360) / 360, Math.max(0, Math.min(100, hs[1])) / 100, 0.5);
+          } else {
+            light.color.copy(light.userData.ha3dOriginalColor);
+          }
+          return light;
+        });
+        binding.light = binding.lights[0] || null;
       }
-
-      binding.marker.classList.toggle("on", on && !unavailable);
-      binding.marker.classList.toggle("unavailable", unavailable);
-      binding.marker.title = unavailable ? `${binding.name} — indisponível` : binding.name;
     }
+    const mobile = window.matchMedia?.("(pointer: coarse)").matches;
+    const deferred = applyShadowBudget(this._modelLights, mobile ? 24 : 48);
+    const meta = this.shadowRoot?.querySelector("#meta");
+    if (meta) meta.textContent = `${this._boundCount} vínculos · ${this._pendingBindings.size} pendentes${deferred ? ` · ${deferred} luzes 3D limitadas` : ""}`;
   }
 
   _updateLightMarkers() {
     if (!this._lightBindings.size || !this._camera) return;
     const stage = this.shadowRoot.querySelector("#stage");
-    const point = new THREE.Vector3();
+    const point = this._markerPoint;
     for (const binding of this._lightBindings.values()) {
       binding.anchor.getWorldPosition(point);
       point.project(this._camera);
@@ -457,6 +429,7 @@ class HA3DPanel extends HTMLElement {
   }
 
   _clearMarkers() {
+    this._pendingBindings.clear();
     this._lightBindings.clear();
     const markers = this.shadowRoot?.querySelector("#markers");
     if (markers) markers.innerHTML = "";
@@ -478,11 +451,6 @@ class HA3DPanel extends HTMLElement {
     const detail = { entityId };
     this.dispatchEvent(new CustomEvent("hass-more-info", { detail, bubbles: true, composed: true }));
 
-    // Fallback for HA builds where the panel event is not caught above the shadow root.
-    try {
-      const root = document.querySelector("home-assistant");
-      if (root) root.dispatchEvent(new CustomEvent("hass-more-info", { detail, bubbles: true, composed: true }));
-    } catch (_error) {}
   }
 
   _fit(object) {
