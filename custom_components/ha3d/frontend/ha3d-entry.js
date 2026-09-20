@@ -8,3 +8,4 @@ import "./ha3d-exact-light-binding.js?v=exact-light-1";
 import "./ha3d-default-top-view.js?v=default-top-1";
 import "./ha3d-scene-icon.js?v=scene-icon-1";
 import "./ha3d-3d-printer-icon.js?v=3d-printer-icon-1";
+import "./ha3d-window-icons.js?v=window-icons-1";
