@@ -4,65 +4,36 @@ const Panel = customElements.get("ha3d-panel");
 if (!Panel) throw new Error("HA3D panel was not registered");
 const proto = Panel.prototype;
 
-const FIX_VERSION = "20260919-8";
-const TV_LIGHT_ENTITY = "light.luz_da_tv";
-const TV_MEDIA_ENTITIES = [
-  "media_player.tv_da_sala_de_estar",
-  "media_player.sala_de_estar_tv_da_sala",
-];
-const LAMP_ENTITY = "light.escritorio_tomada_escritorio_socket_1";
+const FIX_VERSION = "20260919-10";
 
-function normalize(value) {
+// Three.js GLTFLoader sanitizes characters such as the dot in entity_id names.
+// We compensate only for that loader transformation. There are no aliases,
+// friendly-name guesses or house-specific mappings here.
+function loaderSafeName(value) {
   return String(value || "")
-    .replace(/^LightNode_/i, "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]+/gi, "")
-    .toLowerCase();
+    .replace(/[\[\]\.:/]/g, "")
+    .replace(/\s/g, "_");
 }
 
-function findEntityByNodeName(hass, nodeName) {
-  const target = normalize(nodeName);
-  if (!target) return null;
-  const matches = Object.keys(hass?.states || {}).filter((entity) => normalize(entity) === target);
+function entityFromNodeName(hass, nodeName) {
+  const states = hass?.states || {};
+  if (!nodeName) return null;
+
+  // True exact match first.
+  if (states[nodeName]) return nodeName;
+
+  // Compensate only for GLTFLoader name sanitization. Require uniqueness.
+  const matches = Object.keys(states).filter((entity) => loaderSafeName(entity) === nodeName);
   return matches.length === 1 ? matches[0] : null;
 }
 
-function findEntity(hass, candidates) {
-  const states = hass?.states || {};
-  const usable = candidates.find((entity) => {
-    const state = states[entity];
-    return state && !["unknown", "unavailable"].includes(state.state);
-  });
-  return usable || candidates.find((entity) => states[entity]) || null;
-}
-
-function findAnchor(model, entity, aliases = []) {
-  const exactTarget = normalize(entity);
-  const targets = new Set(aliases.map(normalize));
-  let exact = null;
-  let alias = null;
-  model?.traverse((object) => {
-    const name = normalize(object.name);
-    if (!name) return;
-    if (name === exactTarget) exact ||= object;
-    else if (targets.has(name)) alias ||= object;
-  });
-  return exact || alias;
-}
-
-function isTvLampLight(light) {
-  const name = normalize(light?.name);
-  return name.includes("tv") || name.includes("televisao") || name.includes("television");
-}
-
-function glyphFor(entity, state) {
+function markerGlyph(entity, state) {
   const domain = entity.split(".")[0];
   const icon = String(state?.attributes?.icon || "").toLowerCase();
   if (icon.includes("printer")) return "🖨️";
   if (icon.includes("xbox") || icon.includes("gamepad")) return "🎮";
-  if (icon.includes("television") || domain === "media_player") return "📺";
   if (domain === "light") return "💡";
+  if (domain === "media_player") return "📺";
   if (domain === "switch" || domain === "input_boolean") return "🔌";
   if (domain === "vacuum") return "🤖";
   if (domain === "climate") return "❄️";
@@ -75,33 +46,20 @@ function glyphFor(entity, state) {
 }
 
 function visualOn(entity, state) {
-  if (!state || ["unknown", "unavailable"].includes(state.state)) return false;
+  if (!state || state.state === "unknown" || state.state === "unavailable") return false;
   const domain = entity.split(".")[0];
   if (domain === "media_player") return ["on", "playing", "paused", "idle"].includes(state.state);
   if (domain === "vacuum") return ["cleaning", "returning", "spot_cleaning"].includes(state.state);
-  if (domain === "climate") return !["off", "unavailable", "unknown"].includes(state.state);
+  if (domain === "climate") return state.state !== "off";
   if (domain === "cover") return ["open", "opening", "closing"].includes(state.state);
   if (domain === "lock") return state.state === "unlocked";
   return state.state === "on";
 }
 
-function makeMarker(panel, entity, anchor, glyph = null) {
-  const state = panel._hass?.states?.[entity];
-  if (!state || panel._lightBindings?.has(entity) || !anchor) return;
-  panel._makeLightMarker(
-    entity,
-    state.attributes?.friendly_name || entity,
-    anchor,
-    null,
-  );
-  const binding = panel._lightBindings.get(entity);
-  if (binding?.marker) binding.marker.textContent = glyph || glyphFor(entity, state);
-}
-
-function configurePhysicalShadow(light, on) {
+function configureShadow(light, enabled) {
   if (!light) return;
-  light.castShadow = Boolean(on);
-  if (!on || !light.shadow) return;
+  light.castShadow = Boolean(enabled);
+  if (!enabled || !light.shadow) return;
   light.shadow.mapSize.set(512, 512);
   light.shadow.bias = -0.0005;
   light.shadow.normalBias = 0.02;
@@ -113,92 +71,80 @@ function configurePhysicalShadow(light, on) {
   light.shadow.needsUpdate = true;
 }
 
-if (!proto.__ha3dCompatibilityV8) {
-  proto.__ha3dCompatibilityV8 = true;
+if (!proto.__ha3dExactEntityBindingV10) {
+  proto.__ha3dExactEntityBindingV10 = true;
 
   const originalIndexBindings = proto._indexBindings;
   proto._indexBindings = function (...args) {
-    const result = originalIndexBindings.apply(this, args);
+    originalIndexBindings.apply(this, args);
 
-    // Recover exact entity_id bindings even when GLTFLoader sanitizes dots or underscores.
+    const states = this._hass?.states || {};
     this._model?.traverse((object) => {
-      const entity = findEntityByNodeName(this._hass, object.name);
-      if (!entity) return;
+      const entity = entityFromNodeName(this._hass, object.name);
+      if (!entity || !states[entity]) return;
+
       object.userData.ha3dEntityId = entity;
-      if (!this._objectsByEntity.has(entity)) this._objectsByEntity.set(entity, []);
-      const list = this._objectsByEntity.get(entity);
-      if (!list.includes(object)) list.push(object);
+      if (!this._objectsByEntity.has(entity)) {
+        this._objectsByEntity.set(entity, []);
+      }
+      const objects = this._objectsByEntity.get(entity);
+      if (!objects.includes(object)) objects.push(object);
     });
 
-    return result;
+    this._boundCount = this._objectsByEntity.size;
   };
 
-  const originalMappingForLight = proto._mappingForLight;
+  // Physical GLB lights bind only through an exact entity-id node in their
+  // parent chain. No "sala", "TV", "abajur" or other guessed names.
+  proto._directLightMapping = function (light) {
+    const states = this._hass?.states || {};
+    let node = light;
+    while (node && node !== this._model?.parent) {
+      const entity = node.userData?.ha3dEntityId || entityFromNodeName(this._hass, node.name);
+      if (entity?.startsWith("light.") && states[entity]) {
+        return {
+          entity,
+          name: states[entity].attributes?.friendly_name || entity,
+        };
+      }
+      if (node === this._model) break;
+      node = node.parent;
+    }
+    return null;
+  };
+
   proto._mappingForLight = function (light) {
-    // Exact entity name on the GLB light always wins.
-    const exact = findEntityByNodeName(this._hass, light?.name);
-    if (exact?.startsWith("light.")) {
-      return {
-        entity: exact,
-        name: this._hass.states[exact]?.attributes?.friendly_name || exact,
-      };
-    }
-
-    // Alias used by the current APT GLB.
-    const lightName = normalize(light?.name);
-    if (lightName.includes("abajur") && this._hass?.states?.[LAMP_ENTITY]) {
-      return {
-        entity: LAMP_ENTITY,
-        name: this._hass.states[LAMP_ENTITY]?.attributes?.friendly_name || "Abajur escritório",
-      };
-    }
-
-    // The lamp physically above the TV is light.luz_da_tv, never the media_player.
-    if (isTvLampLight(light) && this._hass?.states?.[TV_LIGHT_ENTITY]) {
-      return {
-        entity: TV_LIGHT_ENTITY,
-        name: this._hass.states[TV_LIGHT_ENTITY]?.attributes?.friendly_name || "Luz da TV",
-      };
-    }
-
-    return originalMappingForLight.call(this, light);
+    return this._directLightMapping(light);
   };
 
   const originalBindEntityMarkers = proto._bindEntityLightMarkers;
   proto._bindEntityLightMarkers = function (...args) {
-    const result = originalBindEntityMarkers.apply(this, args);
+    originalBindEntityMarkers.apply(this, args);
+    const states = this._hass?.states || {};
 
-    // Generic markers: every GLB node that matches a Home Assistant entity_id.
-    this._model?.traverse((object) => {
-      const entity = object.userData?.ha3dEntityId || findEntityByNodeName(this._hass, object.name);
-      if (!entity) return;
-      makeMarker(this, entity, object);
-    });
-
-    // Keep the known GLB aliases while exact entity naming is phased in.
-    if (this._hass?.states?.[LAMP_ENTITY] && !this._lightBindings?.has(LAMP_ENTITY)) {
-      const anchor = findAnchor(this._model, LAMP_ENTITY, ["abajur", "abajur escritorio"]);
-      makeMarker(this, LAMP_ENTITY, anchor, "💡");
+    // Same circular marker style as the pre-Astra frontend, for every domain.
+    for (const [entity, objects] of this._objectsByEntity.entries()) {
+      if (this._lightBindings.has(entity) || !objects.length || !states[entity]) continue;
+      this._makeLightMarker(
+        entity,
+        states[entity].attributes?.friendly_name || entity,
+        objects[0],
+        null,
+      );
+      const binding = this._lightBindings.get(entity);
+      if (binding?.marker) binding.marker.textContent = markerGlyph(entity, states[entity]);
     }
 
-    const tvMediaEntity = findEntity(this._hass, TV_MEDIA_ENTITIES);
-    if (tvMediaEntity && !this._lightBindings?.has(tvMediaEntity)) {
-      const anchor = findAnchor(this._model, tvMediaEntity, ["tv", "televisao", "television"]);
-      makeMarker(this, tvMediaEntity, anchor, "📺");
-    }
-
-    this._boundCount = this._lightBindings?.size || 0;
+    this._boundCount = this._lightBindings.size;
     const meta = this.shadowRoot?.querySelector("#meta");
     if (meta) meta.textContent = `${this._boundCount} vínculos`;
-    return result;
   };
 
-  // Unbound physical GLB lights stay off. Global scene fill is separate.
+  // No phantom GLB illumination: an unbound physical light is always off.
+  // The global scene light is separate and is not part of _modelLights.
   proto._restoreUnboundModelLights = function () {
     const boundLights = new Set(
-      [...(this._lightBindings?.values?.() || [])]
-        .map((binding) => binding.light)
-        .filter(Boolean),
+      [...this._lightBindings.values()].map((binding) => binding.light).filter(Boolean),
     );
     for (const light of this._modelLights || []) {
       if (boundLights.has(light)) continue;
@@ -209,42 +155,42 @@ if (!proto.__ha3dCompatibilityV8) {
 
   const originalSyncLightStates = proto._syncLightStates;
   proto._syncLightStates = function (...args) {
-    const result = originalSyncLightStates.apply(this, args);
+    originalSyncLightStates.apply(this, args);
 
-    for (const [entity, binding] of this._lightBindings?.entries?.() || []) {
+    for (const [entity, binding] of this._lightBindings.entries()) {
       const state = this._hass?.states?.[entity];
       if (!state) continue;
-      const unavailable = ["unknown", "unavailable"].includes(state.state);
+      const unavailable = state.state === "unknown" || state.state === "unavailable";
       const on = visualOn(entity, state);
 
       binding.marker?.classList.toggle("on", on && !unavailable);
       binding.marker?.classList.toggle("unavailable", unavailable);
       if (binding.marker) {
-        binding.marker.textContent = glyphFor(entity, state);
+        binding.marker.textContent = markerGlyph(entity, state);
         binding.marker.title = unavailable
           ? `${state.attributes?.friendly_name || entity} — indisponível`
           : state.attributes?.friendly_name || entity;
       }
 
+      // Only light.* entities can control physical GLB lights.
       if (binding.light) {
-        const isPhysicalLight = entity.startsWith("light.");
-        if (!isPhysicalLight) {
+        if (!entity.startsWith("light.")) {
           binding.light.intensity = 0;
           binding.light.castShadow = false;
           binding.light = null;
           continue;
         }
-        configurePhysicalShadow(binding.light, state.state === "on" && !unavailable);
+        configureShadow(binding.light, state.state === "on" && !unavailable);
       }
     }
-
-    return result;
   };
 
   const originalLoadModel = proto._loadModel;
   proto._loadModel = async function (...args) {
     const result = await originalLoadModel.apply(this, args);
 
+    // Physical lights use real wall occlusion. The global scene light remains
+    // shadow-free in the restored pre-Astra scene module.
     this._model?.traverse((object) => {
       if (!object.isMesh) return;
       object.castShadow = true;
