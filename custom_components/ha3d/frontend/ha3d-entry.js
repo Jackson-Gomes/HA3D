@@ -17,3 +17,4 @@ import "./ha3d-xray-idle-v4.js?v=xray-idle-4";
 import "./ha3d-cinematic-light-delay.js?v=cinematic-light-delay-3";
 import "./ha3d-echo-mode.js?v=echo-mode-2";
 import "./ha3d-xray-open-alert.js?v=xray-open-alert-1";
+import "./ha3d-native-state-icons.js?v=native-state-icons-1";
