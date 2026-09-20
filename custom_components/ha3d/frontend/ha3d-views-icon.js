@@ -11,25 +11,35 @@ function applyViewsIcon(panel) {
   return true;
 }
 
+function collectHa3dPanels(root, found = new Set()) {
+  if (!root?.querySelectorAll) return found;
+  for (const element of root.querySelectorAll("*")) {
+    if (element.localName === "ha3d-panel") found.add(element);
+    if (element.shadowRoot) collectHa3dPanels(element.shadowRoot, found);
+  }
+  return found;
+}
+
+function applyToExistingPanels() {
+  for (const panel of collectHa3dPanels(document)) applyViewsIcon(panel);
+}
+
 const proto = Panel.prototype;
-if (!proto.__ha3dViewsIconV1) {
-  proto.__ha3dViewsIconV1 = true;
+if (!proto.__ha3dViewsIconV2) {
+  proto.__ha3dViewsIconV2 = true;
 
-  const originalConnectedCallback = proto.connectedCallback;
-  proto.connectedCallback = function () {
-    originalConnectedCallback?.call(this);
-    queueMicrotask(() => applyViewsIcon(this));
-  };
-
-  const originalBindMarkers = proto._bindEntityLightMarkers;
-  proto._bindEntityLightMarkers = function (...args) {
-    const result = originalBindMarkers?.apply(this, args);
+  // Future instances: apply immediately after the panel creates its shell.
+  const originalRenderShell = proto._renderShell;
+  proto._renderShell = function (...args) {
+    const result = originalRenderShell?.apply(this, args);
     applyViewsIcon(this);
     return result;
   };
 
-  queueMicrotask(() => {
-    const panels = document.querySelectorAll("ha3d-panel");
-    for (const panel of panels) applyViewsIcon(panel);
-  });
+  // Existing instance: Home Assistant nests panels inside open shadow roots,
+  // so document.querySelectorAll("ha3d-panel") alone is not sufficient.
+  queueMicrotask(applyToExistingPanels);
+  requestAnimationFrame(applyToExistingPanels);
+  setTimeout(applyToExistingPanels, 250);
+  setTimeout(applyToExistingPanels, 1000);
 }
