@@ -147,13 +147,31 @@ if (!proto.__ha3dMarkerFilterBarV1) {
   const originalBindMarkers = proto._bindEntityLightMarkers;
   proto._bindEntityLightMarkers = function (...args) {
     const result = originalBindMarkers?.apply(this, args);
+    installFilterBar(this);
     applyMarkerFilter(this);
     return result;
   };
 
+  const hassDescriptor = Object.getOwnPropertyDescriptor(proto, "hass");
+  if (hassDescriptor?.set) {
+    Object.defineProperty(proto, "hass", {
+      configurable: true,
+      enumerable: hassDescriptor.enumerable,
+      get: hassDescriptor.get,
+      set(value) {
+        hassDescriptor.set.call(this, value);
+        queueMicrotask(() => {
+          installFilterBar(this);
+          applyMarkerFilter(this);
+        });
+      },
+    });
+  }
+
   const originalRestoreCinematicUi = proto._restoreCinematicUi;
   proto._restoreCinematicUi = function (...args) {
     const result = originalRestoreCinematicUi?.apply(this, args);
+    installFilterBar(this);
     applyMarkerFilter(this);
     return result;
   };
