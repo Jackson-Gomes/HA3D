@@ -4,3 +4,4 @@
 import "./ha3d-graphics.js?v=frontend-2";
 import "./ha3d-scene.js?v=frontend-2";
 import "./ha3d-entity-markers.js?v=entity-markers-3";
+import "./ha3d-exact-light-binding.js?v=exact-light-1";
