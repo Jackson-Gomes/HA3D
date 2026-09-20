@@ -219,7 +219,7 @@ class HA3DPanel extends HTMLElement {
     try {
       this._setStatus("Lendo configuração…");
       this._config = await this._hass.callApi("GET", "ha3d/config");
-      if (this._config?.model_url) await this._loadModel(this._config.model_url);
+      if (this._config?.model_url) await this._loadModel(this._versionedModelUrl(this._config.model_url, this._config.model_revision));
       else {
         this._showEmpty(true);
         this._setStatus("Envie um modelo GLB");
@@ -245,14 +245,20 @@ class HA3DPanel extends HTMLElement {
       const response = await this._hass.fetchWithAuth("/api/ha3d/model", { method: "POST", body: form });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
-      this._config = { ...(this._config || {}), model_url: result.model_url };
-      await this._loadModel(`${result.model_url}?v=${Date.now()}`);
+      this._config = { ...(this._config || {}), model_url: result.model_url, model_revision: result.model_revision };
+      await this._loadModel(this._versionedModelUrl(result.model_url, result.model_revision));
     } catch (error) {
       console.error("[HA3D] upload", error);
       this._setStatus(`Falha no upload: ${error.message || error}`);
     } finally {
       this._setUploadEnabled(true);
     }
+  }
+
+  _versionedModelUrl(url, revision) {
+    if (!url || !revision) return url;
+    const separator = url.includes("?") ? "&" : "?";
+    return `${url}${separator}v=${encodeURIComponent(revision)}`;
   }
 
   async _loadModel(url) {
