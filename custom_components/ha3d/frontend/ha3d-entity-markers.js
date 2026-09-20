@@ -1,4 +1,9 @@
+import * as THREE from "https://esm.sh/three@0.180.0";
+
 const ENTITY_ID = /^[a-z0-9_]+\.[a-z0-9_]+$/;
+const MEDIA_LIGHT_PREFIX = "LightNode_media_player.";
+const MEDIA_BLUE = new THREE.Color(0x3a7bff);
+const MEDIA_PURPLE_BLUE = new THREE.Color(0x754dff);
 const Panel = customElements.get("ha3d-panel");
 if (!Panel) throw new Error("HA3D panel was not registered");
 
@@ -58,6 +63,19 @@ function rememberOriginalNames(gltf) {
   });
 }
 
+function mediaEntityForLight(light) {
+  let node = light;
+  while (node) {
+    const name = originalName(node);
+    if (name.startsWith(MEDIA_LIGHT_PREFIX)) {
+      const entity = name.slice("LightNode_".length);
+      return ENTITY_ID.test(entity) ? entity : null;
+    }
+    node = node.parent;
+  }
+  return null;
+}
+
 if (!proto.__ha3dExactEntityMarkersV1) {
   proto.__ha3dExactEntityMarkersV1 = true;
 
@@ -76,7 +94,63 @@ if (!proto.__ha3dExactEntityMarkersV1) {
         return gltf;
       };
     }
+
+    // Run the lightweight media glow immediately before each existing render.
+    // This leaves the proven animation loop untouched.
+    const renderer = this._renderer;
+    if (renderer?.render && !renderer.__ha3dMediaFxHook) {
+      renderer.__ha3dMediaFxHook = true;
+      const render = renderer.render.bind(renderer);
+      renderer.render = (...renderArgs) => {
+        this._updateMediaLightFx?.(performance.now());
+        return render(...renderArgs);
+      };
+    }
     return result;
+  };
+
+  // Keep the existing GLB-light collection logic, adding only a media tag for
+  // lights whose original glTF node is LightNode_media_player.<entity_id>.
+  const originalCollectModelLights = proto._collectModelLights;
+  proto._collectModelLights = function (...args) {
+    const result = originalCollectModelLights.apply(this, args);
+    for (const light of this._modelLights || []) {
+      const entity = mediaEntityForLight(light);
+      if (!entity) continue;
+      light.userData.ha3dMediaFx = true;
+      light.userData.ha3dMediaEntityId = entity;
+      light.userData.ha3dMediaBaseIntensity = Number(light.userData.ha3dBaseIntensity || light.intensity || 0);
+    }
+    return result;
+  };
+
+  proto._updateMediaLightFx = function (timeMs) {
+    if (!this._modelLights?.length) return;
+    const t = Number(timeMs || 0) * 0.001;
+
+    for (const light of this._modelLights) {
+      if (!light.userData?.ha3dMediaFx) continue;
+
+      const entity = light.userData.ha3dMediaEntityId;
+      const state = this._hass?.states?.[entity];
+      const unavailable = state && (state.state === "unavailable" || state.state === "unknown");
+      const off = state?.state === "off";
+
+      if (unavailable || off) {
+        light.intensity = 0;
+        continue;
+      }
+
+      const base = Number(light.userData.ha3dMediaBaseIntensity || light.userData.ha3dBaseIntensity || 0);
+      if (!(base > 0)) continue;
+
+      // Two slow waves keep the effect organic instead of looking like a blink.
+      const colorWave = 0.5 + 0.5 * Math.sin(t * 1.45 + 0.35 * Math.sin(t * 0.63));
+      const flicker = 0.88 + 0.12 * (0.5 + 0.5 * Math.sin(t * 5.2 + 0.45 * Math.sin(t * 2.1)));
+
+      light.intensity = base * flicker;
+      light.color.copy(MEDIA_BLUE).lerp(MEDIA_PURPLE_BLUE, colorWave);
+    }
   };
 
   // Keep every existing binding behavior, then add only exact entity_id node
