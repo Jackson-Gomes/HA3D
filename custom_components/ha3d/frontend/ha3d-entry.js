@@ -14,4 +14,4 @@ import "./ha3d-marker-filter-bar.js?v=marker-filter-3";
 import "./ha3d-views-icon.js?v=views-icon-2";
 import "./ha3d-scene-prefix-menu.js?v=scene-prefix-menu-1";
 import "./ha3d-xray-idle-v4.js?v=xray-idle-4";
-import "./ha3d-cinematic-light-delay.js?v=cinematic-light-delay-2";
+import "./ha3d-cinematic-light-delay.js?v=cinematic-light-delay-3";
