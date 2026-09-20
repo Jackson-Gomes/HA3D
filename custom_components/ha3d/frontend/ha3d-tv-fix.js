@@ -4,13 +4,12 @@ const Panel = customElements.get("ha3d-panel");
 if (!Panel) throw new Error("HA3D panel was not registered");
 const proto = Panel.prototype;
 
-const FIX_VERSION = "20260919-6";
+const FIX_VERSION = "20260919-8";
 const TV_LIGHT_ENTITY = "light.luz_da_tv";
 const TV_MEDIA_ENTITIES = [
   "media_player.tv_da_sala_de_estar",
   "media_player.sala_de_estar_tv_da_sala",
 ];
-const PRINTER_ENTITY = "switch.impressora_3d_socket_1";
 const LAMP_ENTITY = "light.escritorio_tomada_escritorio_socket_1";
 
 function normalize(value) {
@@ -20,6 +19,13 @@ function normalize(value) {
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9]+/gi, "")
     .toLowerCase();
+}
+
+function findEntityByNodeName(hass, nodeName) {
+  const target = normalize(nodeName);
+  if (!target) return null;
+  const matches = Object.keys(hass?.states || {}).filter((entity) => normalize(entity) === target);
+  return matches.length === 1 ? matches[0] : null;
 }
 
 function findEntity(hass, candidates) {
@@ -50,13 +56,46 @@ function isTvLampLight(light) {
   return name.includes("tv") || name.includes("televisao") || name.includes("television");
 }
 
-function makeHardMarker(panel, entity, title, aliases = [], glyph = "💡") {
-  if (!panel._hass?.states?.[entity] || panel._lightBindings?.has(entity)) return;
-  const anchor = panel._objectsByEntity?.get(entity)?.[0] || findAnchor(panel._model, entity, aliases);
-  if (!anchor) return;
-  panel._makeLightMarker(entity, title, anchor, null);
+function glyphFor(entity, state) {
+  const domain = entity.split(".")[0];
+  const icon = String(state?.attributes?.icon || "").toLowerCase();
+  if (icon.includes("printer")) return "🖨️";
+  if (icon.includes("xbox") || icon.includes("gamepad")) return "🎮";
+  if (icon.includes("television") || domain === "media_player") return "📺";
+  if (domain === "light") return "💡";
+  if (domain === "switch" || domain === "input_boolean") return "🔌";
+  if (domain === "vacuum") return "🤖";
+  if (domain === "climate") return "❄️";
+  if (domain === "fan") return "🌀";
+  if (domain === "lock") return "🔒";
+  if (domain === "cover") return "🪟";
+  if (domain === "binary_sensor") return "◉";
+  if (domain === "sensor") return "●";
+  return "●";
+}
+
+function visualOn(entity, state) {
+  if (!state || ["unknown", "unavailable"].includes(state.state)) return false;
+  const domain = entity.split(".")[0];
+  if (domain === "media_player") return ["on", "playing", "paused", "idle"].includes(state.state);
+  if (domain === "vacuum") return ["cleaning", "returning", "spot_cleaning"].includes(state.state);
+  if (domain === "climate") return !["off", "unavailable", "unknown"].includes(state.state);
+  if (domain === "cover") return ["open", "opening", "closing"].includes(state.state);
+  if (domain === "lock") return state.state === "unlocked";
+  return state.state === "on";
+}
+
+function makeMarker(panel, entity, anchor, glyph = null) {
+  const state = panel._hass?.states?.[entity];
+  if (!state || panel._lightBindings?.has(entity) || !anchor) return;
+  panel._makeLightMarker(
+    entity,
+    state.attributes?.friendly_name || entity,
+    anchor,
+    null,
+  );
   const binding = panel._lightBindings.get(entity);
-  if (binding?.marker) binding.marker.textContent = glyph;
+  if (binding?.marker) binding.marker.textContent = glyph || glyphFor(entity, state);
 }
 
 function configurePhysicalShadow(light, on) {
@@ -74,13 +113,47 @@ function configurePhysicalShadow(light, on) {
   light.shadow.needsUpdate = true;
 }
 
-if (!proto.__ha3dTvWallFixV6) {
-  proto.__ha3dTvWallFixV6 = true;
+if (!proto.__ha3dCompatibilityV8) {
+  proto.__ha3dCompatibilityV8 = true;
 
-  // The GLB lamp above the TV is a normal Home Assistant light.
-  // It is NOT the television/media_player.
+  const originalIndexBindings = proto._indexBindings;
+  proto._indexBindings = function (...args) {
+    const result = originalIndexBindings.apply(this, args);
+
+    // Recover exact entity_id bindings even when GLTFLoader sanitizes dots or underscores.
+    this._model?.traverse((object) => {
+      const entity = findEntityByNodeName(this._hass, object.name);
+      if (!entity) return;
+      object.userData.ha3dEntityId = entity;
+      if (!this._objectsByEntity.has(entity)) this._objectsByEntity.set(entity, []);
+      const list = this._objectsByEntity.get(entity);
+      if (!list.includes(object)) list.push(object);
+    });
+
+    return result;
+  };
+
   const originalMappingForLight = proto._mappingForLight;
   proto._mappingForLight = function (light) {
+    // Exact entity name on the GLB light always wins.
+    const exact = findEntityByNodeName(this._hass, light?.name);
+    if (exact?.startsWith("light.")) {
+      return {
+        entity: exact,
+        name: this._hass.states[exact]?.attributes?.friendly_name || exact,
+      };
+    }
+
+    // Alias used by the current APT GLB.
+    const lightName = normalize(light?.name);
+    if (lightName.includes("abajur") && this._hass?.states?.[LAMP_ENTITY]) {
+      return {
+        entity: LAMP_ENTITY,
+        name: this._hass.states[LAMP_ENTITY]?.attributes?.friendly_name || "Abajur escritório",
+      };
+    }
+
+    // The lamp physically above the TV is light.luz_da_tv, never the media_player.
     if (isTvLampLight(light) && this._hass?.states?.[TV_LIGHT_ENTITY]) {
       return {
         entity: TV_LIGHT_ENTITY,
@@ -88,67 +161,45 @@ if (!proto.__ha3dTvWallFixV6) {
       };
     }
 
-    const name = normalize(light?.name);
-    if (name.includes("abajur") && this._hass?.states?.[LAMP_ENTITY]) {
-      return {
-        entity: LAMP_ENTITY,
-        name: this._hass.states[LAMP_ENTITY]?.attributes?.friendly_name || "Abajur escritório",
-      };
-    }
-
     return originalMappingForLight.call(this, light);
   };
 
-  // Preserve the old circular marker style. Add only the non-light devices that
-  // the old light-only marker pass does not create by itself.
   const originalBindEntityMarkers = proto._bindEntityLightMarkers;
   proto._bindEntityLightMarkers = function (...args) {
     const result = originalBindEntityMarkers.apply(this, args);
 
-    makeHardMarker(
-      this,
-      PRINTER_ENTITY,
-      this._hass?.states?.[PRINTER_ENTITY]?.attributes?.friendly_name || "Impressora 3D",
-      [PRINTER_ENTITY, "impressora 3d", "printer 3d", "printer"],
-      "🖨️",
-    );
+    // Generic markers: every GLB node that matches a Home Assistant entity_id.
+    this._model?.traverse((object) => {
+      const entity = object.userData?.ha3dEntityId || findEntityByNodeName(this._hass, object.name);
+      if (!entity) return;
+      makeMarker(this, entity, object);
+    });
 
-    makeHardMarker(
-      this,
-      LAMP_ENTITY,
-      this._hass?.states?.[LAMP_ENTITY]?.attributes?.friendly_name || "Abajur escritório",
-      [LAMP_ENTITY, "abajur", "abajur escritorio"],
-      "💡",
-    );
+    // Keep the known GLB aliases while exact entity naming is phased in.
+    if (this._hass?.states?.[LAMP_ENTITY] && !this._lightBindings?.has(LAMP_ENTITY)) {
+      const anchor = findAnchor(this._model, LAMP_ENTITY, ["abajur", "abajur escritorio"]);
+      makeMarker(this, LAMP_ENTITY, anchor, "💡");
+    }
 
     const tvMediaEntity = findEntity(this._hass, TV_MEDIA_ENTITIES);
     if (tvMediaEntity && !this._lightBindings?.has(tvMediaEntity)) {
-      makeHardMarker(
-        this,
-        tvMediaEntity,
-        this._hass?.states?.[tvMediaEntity]?.attributes?.friendly_name || "TV da sala",
-        [tvMediaEntity, "tv", "televisao", "television"],
-        "📺",
-      );
+      const anchor = findAnchor(this._model, tvMediaEntity, ["tv", "televisao", "television"]);
+      makeMarker(this, tvMediaEntity, anchor, "📺");
     }
 
-    this._boundCount = this._lightBindings?.size || this._boundCount;
+    this._boundCount = this._lightBindings?.size || 0;
     const meta = this.shadowRoot?.querySelector("#meta");
     if (meta) meta.textContent = `${this._boundCount} vínculos`;
     return result;
   };
 
-  // The pre-Astra frontend intentionally restored every unbound GLB light.
-  // That creates phantom illumination when HA says all physical lights are off.
-  // From now on only HA-bound model lights may emit; the global scene fill is
-  // separate and is not part of _modelLights.
+  // Unbound physical GLB lights stay off. Global scene fill is separate.
   proto._restoreUnboundModelLights = function () {
     const boundLights = new Set(
       [...(this._lightBindings?.values?.() || [])]
         .map((binding) => binding.light)
         .filter(Boolean),
     );
-
     for (const light of this._modelLights || []) {
       if (boundLights.has(light)) continue;
       light.intensity = 0;
@@ -160,34 +211,30 @@ if (!proto.__ha3dTvWallFixV6) {
   proto._syncLightStates = function (...args) {
     const result = originalSyncLightStates.apply(this, args);
 
-    // Make sure every HA-bound physical light has wall-blocking shadows when on.
-    for (const binding of this._lightBindings?.values?.() || []) {
-      if (!binding.light) continue;
-      const state = this._hass?.states?.[binding.entity];
+    for (const [entity, binding] of this._lightBindings?.entries?.() || []) {
+      const state = this._hass?.states?.[entity];
       if (!state) continue;
-      const on = state.state === "on" && !["unknown", "unavailable"].includes(state.state);
-      configurePhysicalShadow(binding.light, on);
-    }
+      const unavailable = ["unknown", "unavailable"].includes(state.state);
+      const on = visualOn(entity, state);
 
-    // media_player TV is visual state only. It never drives the physical TV lamp.
-    const tvMediaEntity = findEntity(this._hass, TV_MEDIA_ENTITIES);
-    const tvBinding = tvMediaEntity ? this._lightBindings?.get(tvMediaEntity) : null;
-    const tvState = tvMediaEntity ? this._hass?.states?.[tvMediaEntity] : null;
-    if (tvBinding && tvState) {
-      const unavailable = ["unknown", "unavailable"].includes(tvState.state);
-      const active = !unavailable && ["on", "playing", "paused", "idle"].includes(tvState.state);
-      tvBinding.marker?.classList.toggle("on", active);
-      tvBinding.marker?.classList.toggle("unavailable", unavailable);
-      if (tvBinding.marker) {
-        tvBinding.marker.title = unavailable
-          ? `${tvBinding.name || "TV da sala"} — indisponível`
-          : tvBinding.name || "TV da sala";
+      binding.marker?.classList.toggle("on", on && !unavailable);
+      binding.marker?.classList.toggle("unavailable", unavailable);
+      if (binding.marker) {
+        binding.marker.textContent = glyphFor(entity, state);
+        binding.marker.title = unavailable
+          ? `${state.attributes?.friendly_name || entity} — indisponível`
+          : state.attributes?.friendly_name || entity;
       }
-      // Defensive: a media_player marker must never own a GLB physical light.
-      if (tvBinding.light) {
-        tvBinding.light.intensity = 0;
-        tvBinding.light.castShadow = false;
-        tvBinding.light = null;
+
+      if (binding.light) {
+        const isPhysicalLight = entity.startsWith("light.");
+        if (!isPhysicalLight) {
+          binding.light.intensity = 0;
+          binding.light.castShadow = false;
+          binding.light = null;
+          continue;
+        }
+        configurePhysicalShadow(binding.light, state.state === "on" && !unavailable);
       }
     }
 
@@ -208,9 +255,8 @@ if (!proto.__ha3dTvWallFixV6) {
       }
     });
 
-    // Re-sync once after the wall occluders are prepared.
     this._syncLightStates?.();
-    this.setAttribute("data-ha3d-tv-fix", FIX_VERSION);
+    this.setAttribute("data-ha3d-fix", FIX_VERSION);
     return result;
   };
 }
