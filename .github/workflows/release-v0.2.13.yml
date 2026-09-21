@@ -1,0 +1,18 @@
+name: Publish HA3D v0.2.13
+
+on:
+  push:
+    paths:
+      - '.github/workflows/release-v0.2.13.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish v0.2.13
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release view v0.2.13 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create v0.2.13 --repo "$GITHUB_REPOSITORY" --target "d51c749fb3a1c43bd3eedbdee14e768d0efaff01" --title "HA3D v0.2.13" --notes "Fix Xiaomi Map Extractor rotation direction so the robot/icon follows the map rotation instead of moving in the opposite direction. No other HA3D behavior changed."
