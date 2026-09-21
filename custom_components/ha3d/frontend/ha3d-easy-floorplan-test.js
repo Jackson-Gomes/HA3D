@@ -289,6 +289,9 @@ if (!proto.__ha3dEasyFloorplanTestV1) {
   proto._wireUi = function (...args) {
     oldWireUi.apply(this, args);
     this._renderer.domElement.addEventListener("pointerdown", (event) => {
+      // A robot-calibration marker owns the transform gizmo until it is saved
+      // or cancelled. Do not pick the GLB object behind it on a canvas click.
+      if (this._robotCalibrationMarker) return;
       if (this._editorMode) {
         const object = this._pickObject(event);
         this._selectForEditor(object);
@@ -318,6 +321,7 @@ if (!proto.__ha3dEasyFloorplanTestV1) {
 
   const oldPick = proto._pick;
   proto._pick = function (event) {
+    if (this._robotCalibrationMarker) return;
     if (!this._editorMode) return this._handleGesturePick(event, "tap", oldPick);
     this._selectForEditor(this._pickObject(event));
   };

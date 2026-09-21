@@ -116,6 +116,13 @@ if (!proto.__ha3dRobotTrackersV1) {
   const update = proto._updateLightMarkers;
   proto._updateLightMarkers = function (...args) { update.apply(this, args); this._updateRobots(); };
 
+  const persistTransform = proto._persistSelectedTransform;
+  proto._persistSelectedTransform = async function (...args) {
+    // Calibration spheres belong to HA3D, never to the user's GLB layout.
+    if (this._selectedObject === this._robotCalibrationMarker) return;
+    return persistTransform.apply(this, args);
+  };
+
   proto._robotObjects = function () { return this._robotEntries || new Map(); };
   proto._rebuildRobots = function () {
     if (!this._scene) return;
@@ -221,13 +228,18 @@ if (!proto.__ha3dRobotTrackersV1) {
     const raw = getPosition(this._hass, draft.position_entity); if (!raw) return status("O sensor não traz X/Y agora. Confira a entidade de posição.");
     if (this._robotCalibrationMarker?.parent) this._robotCalibrationMarker.parent.remove(this._robotCalibrationMarker);
     const marker = new THREE.Mesh(new THREE.SphereGeometry(0.16, 20, 12), new THREE.MeshStandardMaterial({ color: point === "a" ? 0xffa726 : 0xab47bc, emissive: point === "a" ? 0x6a3100 : 0x3c104d, emissiveIntensity: 0.45 }));
-    marker.name = `HA3D calibration ${point.toUpperCase()}`; marker.position.copy(this._selectedObject?.getWorldPosition?.(new THREE.Vector3()) || this._controls.target); marker.position.y = number(draft.floor_y); this._scene.add(marker);
-    this._robotCalibrationMarker = marker; this._robotCalibration = { id: draft.id, point, raw: [raw.x, raw.y], draft }; this._transformControls?.attach(marker); this._transformControls.enabled = true; this._transformControls.visible = true; this._transformControls.setMode("translate");
-    status(`Ponto ${point.toUpperCase()} capturado. Arraste a esfera ${point === "a" ? "laranja" : "roxa"} até o centro físico do robô e clique “Salvar ${point.toUpperCase()}”.`);
+    const bounds = this._model ? new THREE.Box3().setFromObject(this._model) : null;
+    const defaultHeight = bounds && !bounds.isEmpty() ? bounds.min.y + Math.max(0.08, bounds.getSize(new THREE.Vector3()).y * 0.015) : number(draft.floor_y);
+    marker.name = `HA3D calibration ${point.toUpperCase()}`; marker.userData.ha3dRobotCalibration = true;
+    marker.position.copy(this._controls.target); marker.position.y = number(draft.floor_y) || defaultHeight; this._scene.add(marker);
+    this._robotCalibrationMarker = marker; this._robotCalibration = { id: draft.id, point, raw: [raw.x, raw.y], draft }; this._selectedObject = marker;
+    this._editorMode = true; this.shadowRoot?.querySelector("#ha3dEditor")?.classList.add("open"); this.shadowRoot?.querySelector("#editorButton")?.classList.add("active");
+    this._transformControls?.attach(marker); this._transformControls.enabled = true; this._transformControls.visible = true; this._transformControls.setMode("translate");
+    status(`Ponto ${point.toUpperCase()} capturado. A tríade está presa à esfera ${point === "a" ? "laranja" : "roxa"}; mova-a até o robô e clique “Salvar ${point.toUpperCase()}”.`);
   };
   proto._robotSavePoint = async function (robotId, point, status) {
     const active = this._robotCalibration; if (!active || active.id !== robotId || active.point !== point || !this._robotCalibrationMarker) return status(`Clique “Capturar ${point.toUpperCase()}” antes.`);
-    const robots = (this._config?.robots || []).map((robot) => { if (robot.id !== robotId) return robot; const calibration = { ...(robot.calibration || {}) }; calibration[`raw_${point}`] = active.raw; calibration[`model_${point}`] = [this._robotCalibrationMarker.position.x, this._robotCalibrationMarker.position.z]; return { ...this._robotFromRow(robot, this.shadowRoot.querySelector(`[data-robot-id="${CSS.escape(robotId)}"]`)), calibration }; });
+    const robots = (this._config?.robots || []).map((robot) => { if (robot.id !== robotId) return robot; const calibration = { ...(robot.calibration || {}) }; calibration[`raw_${point}`] = active.raw; calibration[`model_${point}`] = [this._robotCalibrationMarker.position.x, this._robotCalibrationMarker.position.z]; return { ...this._robotFromRow(robot, this.shadowRoot.querySelector(`[data-robot-id="${CSS.escape(robotId)}"]`)), floor_y: this._robotCalibrationMarker.position.y, calibration }; });
     this._transformControls?.detach(); this._robotCalibrationMarker.parent?.remove(this._robotCalibrationMarker); this._robotCalibrationMarker = null; this._robotCalibration = null;
     try { await this._saveConfigPatch({ robots }); this._rebuildRobots(); this._renderRobotsPanel(); this._setStatus(`Ponto ${point.toUpperCase()} salvo`); } catch (error) { status(`Erro: ${error.message || error}`); }
   };
