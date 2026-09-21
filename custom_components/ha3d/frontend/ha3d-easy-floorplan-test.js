@@ -106,11 +106,13 @@ if (!proto.__ha3dEasyFloorplanTestV1) {
       <div class="ha3dRow"><label>Leituras extras (uma por linha: entity_id ou entity_id:atributo)</label><textarea id="ha3dReadings" placeholder="sensor.temperatura_sala\nsensor.umidade_sala">${(advanced.readings || []).map((item) => typeof item === "string" ? item : `${item.entity_id || ""}${item.attribute ? `:${item.attribute}` : ""}`).join("\n")}</textarea></div>
       <div class="ha3dRow"><label>Regras visuais JSON (ex.: [{"state":"on","color":"#ffd54f","icon":"💡"}])</label><textarea id="ha3dRules">${JSON.stringify(advanced.state_rules || [])}</textarea></div>
       <div class="ha3dRow"><label><input id="ha3dZoomOnly" type="checkbox" ${advanced.show_only_when_zoomed ? "checked" : ""}> Exibir somente quando próximo</label></div>
-      <div class="ha3dEditorActions"><button id="ha3dSaveObject" type="button">Salvar binding</button><button id="ha3dAddArea" class="secondary" type="button">Adicionar entidades da área</button></div>`;
+      <div class="ha3dEditorActions"><button id="ha3dSaveObject" type="button">Salvar binding</button><button id="ha3dAddArea" class="secondary" type="button">Adicionar entidades da área</button><button id="ha3dRemoveBinding" class="secondary" type="button">Remover binding</button><button id="ha3dRemoveArea" class="secondary" type="button">Remover entidades da área</button></div>`;
     this._updateEntityChoices(area);
     body.querySelector("#ha3dArea").addEventListener("change", (event) => this._updateEntityChoices(event.target.value));
     body.querySelector("#ha3dSaveObject").addEventListener("click", () => this._saveEditorBinding(name));
     body.querySelector("#ha3dAddArea").addEventListener("click", () => this._addAreaEntities(name));
+    body.querySelector("#ha3dRemoveBinding").addEventListener("click", () => this._removeEditorBinding(name));
+    body.querySelector("#ha3dRemoveArea").addEventListener("click", () => this._removeAreaEntities(name));
   };
 
   proto._saveConfigPatch = async function (patch) {
@@ -140,7 +142,7 @@ if (!proto.__ha3dEasyFloorplanTestV1) {
     try { rules = JSON.parse(body.querySelector("#ha3dRules").value || "[]"); if (!Array.isArray(rules)) throw Error(); } catch (_error) { this._setStatus("Regras precisam ser uma lista JSON válida"); return; }
     const entityId = body.querySelector("#ha3dEntity").value.trim();
     const readings = body.querySelector("#ha3dReadings").value.split("\n").map((line) => line.trim()).filter(Boolean).map((line) => { const [entity_id, attribute] = line.split(":", 2); return attribute ? { entity_id, attribute } : { entity_id }; });
-    const advanced = { ...(this._config?.advanced_bindings || {}), [name]: { entity_id: entityId || undefined, readings, state_rules: rules, show_only_when_zoomed: body.querySelector("#ha3dZoomOnly").checked } };
+    const advanced = { ...(this._config?.advanced_bindings || {}), [name]: { ...(this._config?.advanced_bindings?.[name] || {}), entity_id: entityId || undefined, readings, state_rules: rules, show_only_when_zoomed: body.querySelector("#ha3dZoomOnly").checked } };
     const areas = { ...(this._config?.area_bindings || {}) }; const area = body.querySelector("#ha3dArea").value; if (area) areas[name] = area; else delete areas[name];
     try { await this._saveConfigPatch({ advanced_bindings: advanced, area_bindings: areas }); this._indexBindings(); this._clearMarkers(); this._bindModelLights(); this._bindEntityLightMarkers(); this._bindAdvancedMarkers(); this._syncLightStates(); this._setStatus("Binding salvo"); } catch (error) { this._setStatus(`Erro ao salvar: ${error.message || error}`); }
   };
@@ -166,7 +168,35 @@ if (!proto.__ha3dEasyFloorplanTestV1) {
       // GLB node origins are often at a parent pivot, not inside the mesh. Use
       // its visual bounds for editor-created markers so they land on the item.
       binding.ha3dAnchorBounds = true;
+      binding.ha3dMarkerOffset = new THREE.Vector3(...(config.marker_offset || [0, 0, 0]));
+      this._wireMarkerEditorDrag(binding, key);
     }
+  };
+
+  proto._wireMarkerEditorDrag = function (binding, configKey) {
+    if (binding.marker.dataset.ha3dEditorDrag) return;
+    binding.marker.dataset.ha3dEditorDrag = "true";
+    binding.marker.addEventListener("pointerdown", (event) => {
+      if (!this._editorMode) return;
+      event.preventDefault(); event.stopImmediatePropagation();
+      const box = new THREE.Box3().setFromObject(binding.anchor);
+      const center = box.getCenter(new THREE.Vector3());
+      const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(this._camera.getWorldDirection(new THREE.Vector3()), center);
+      const point = new THREE.Vector3();
+      const move = (moveEvent) => {
+        const rect = this._renderer.domElement.getBoundingClientRect();
+        this._pointer.set(((moveEvent.clientX - rect.left) / rect.width) * 2 - 1, -((moveEvent.clientY - rect.top) / rect.height) * 2 + 1);
+        this._raycaster.setFromCamera(this._pointer, this._camera);
+        if (this._raycaster.ray.intersectPlane(plane, point)) binding.ha3dMarkerOffset.copy(point).sub(center);
+      };
+      const up = async () => {
+        window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up);
+        const advanced = { ...(this._config?.advanced_bindings || {}) };
+        advanced[configKey] = { ...advanced[configKey], marker_offset: binding.ha3dMarkerOffset.toArray() };
+        try { await this._saveConfigPatch({ advanced_bindings: advanced }); this._setStatus("Posição do marcador salva"); } catch (error) { this._setStatus(`Erro ao salvar marcador: ${error.message || error}`); }
+      };
+      window.addEventListener("pointermove", move); window.addEventListener("pointerup", up, { once: true });
+    }, true);
   };
 
   const oldSync = proto._syncLightStates;
@@ -196,7 +226,7 @@ if (!proto.__ha3dEasyFloorplanTestV1) {
       if (binding.ha3dAnchorBounds) {
         const box = new THREE.Box3().setFromObject(binding.anchor);
         if (box.isEmpty()) continue;
-        const point = box.getCenter(new THREE.Vector3()).project(this._camera);
+        const point = box.getCenter(new THREE.Vector3()).add(binding.ha3dMarkerOffset || new THREE.Vector3()).project(this._camera);
         const stage = this.shadowRoot.querySelector("#stage");
         const visible = point.z > -1 && point.z < 1 && Math.abs(point.x) <= 1.15 && Math.abs(point.y) <= 1.15;
         binding.marker.style.visibility = visible ? "visible" : "hidden";
@@ -206,6 +236,21 @@ if (!proto.__ha3dEasyFloorplanTestV1) {
         }
       }
     }
+  };
+  proto._refreshMarkers = function () {
+    this._indexBindings(); this._clearMarkers(); this._bindModelLights();
+    this._bindEntityLightMarkers(); this._bindAdvancedMarkers(); this._syncLightStates();
+  };
+  proto._removeEditorBinding = async function (name) {
+    const advanced = { ...(this._config?.advanced_bindings || {}) };
+    const areas = { ...(this._config?.area_bindings || {}) };
+    delete advanced[name]; delete areas[name];
+    try { await this._saveConfigPatch({ advanced_bindings: advanced, area_bindings: areas }); this._refreshMarkers(); this._renderEditorForm(); this._setStatus("Binding removido"); } catch (error) { this._setStatus(`Erro ao remover: ${error.message || error}`); }
+  };
+  proto._removeAreaEntities = async function (name) {
+    const advanced = { ...(this._config?.advanced_bindings || {}) };
+    for (const [key, value] of Object.entries(advanced)) if (key.startsWith("__area__") && value.anchor === name) delete advanced[key];
+    try { await this._saveConfigPatch({ advanced_bindings: advanced }); this._refreshMarkers(); this._setStatus("Entidades adicionadas pela área removidas"); } catch (error) { this._setStatus(`Erro ao remover: ${error.message || error}`); }
   };
 
   const oldFit = proto._fit;
