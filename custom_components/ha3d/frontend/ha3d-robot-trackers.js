@@ -3,10 +3,12 @@
  * UX ideas: Easy Floorplan (MIT) and Home Assistant 3D Floorplan Extended
  * (ISC). No source code or assets from either project are included.
  */
-import * as THREE from "https://esm.sh/three@0.180.0";
-
 const Panel = customElements.get("ha3d-panel");
 if (!Panel) throw new Error("HA3D panel was not registered");
+// Keep robot meshes in the same Three.js universe as the viewer. Importing a
+// second ESM copy looks identical, but Three rejects its Object3D instances.
+const THREE = Panel.HA3D_THREE;
+if (!THREE) throw new Error("HA3D Three.js runtime was not registered");
 const proto = Panel.prototype;
 
 const esc = (value) => String(value ?? "").replace(/[&<>\"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" })[char]);
@@ -163,7 +165,7 @@ if (!proto.__ha3dRobotTrackersV1) {
   proto._renderRobotsPanel = function () {
     const panel = this.shadowRoot.querySelector("#ha3dRobots"); if (!panel) return;
     const robots = this._config?.robots || [];
-    panel.innerHTML = `<div class="ha3dEditorHead"><h3>Robôs</h3></div><p class="ha3dRobotHint">Escolha o aspirador e o sensor com posição. Para calibrar, coloque o robô em dois locais e mova os marcadores A e B com a tríade do Editor.</p><div class="ha3dRobotActions"><button id="ha3dAddRobot" type="button">Adicionar robô</button></div>${robots.map((robot) => this._robotRow(robot)).join("") || '<p class="ha3dRobotHint">Nenhum robô configurado.</p>'}`;
+    panel.innerHTML = `<div class="ha3dEditorHead"><h3>Robôs</h3></div><p class="ha3dRobotHint">Escolha o aspirador e o sensor com posição. Para calibrar, coloque o robô em dois locais e mova os marcadores A e B com a tríade do Editor.</p><div class="ha3dRobotActions"><button id="ha3dAddRobot" type="button">Adicionar robô</button></div><div class="ha3dRobotStatus" id="ha3dRobotAddStatus"></div>${robots.map((robot) => this._robotRow(robot)).join("") || '<p class="ha3dRobotHint">Nenhum robô configurado.</p>'}`;
     panel.querySelector("#ha3dAddRobot").addEventListener("click", () => this._addRobot());
     robots.forEach((robot) => this._wireRobotRow(robot));
   };
@@ -172,10 +174,24 @@ if (!proto.__ha3dRobotTrackersV1) {
     return `<div class="ha3dRobotRow" data-robot-id="${esc(robot.id)}"><strong>${esc(robot.name || "Robô")}</strong><div class="ha3dRobotMeta">${ready ? "Calibrado" : "Calibração pendente"} · ${esc(robot.position_entity)}</div><div class="ha3dRobotGrid"><label>Nome<input data-field="name" value="${esc(robot.name || "")}"></label><label>Representação<select data-field="display"><option value="icon" ${robot.display !== "object" ? "selected" : ""}>Ícone 3D</option><option value="object" ${robot.display === "object" ? "selected" : ""}>Objeto do GLB</option></select></label><label>Entidade do robô<select data-field="vacuum_entity">${this._robotChoices(robot.vacuum_entity)}</select></label><label>Sensor de posição<select data-field="position_entity">${this._robotChoices(robot.position_entity)}</select></label><label>Objeto GLB<input data-field="object_name" value="${esc(robot.object_name || "")}" placeholder="Nome do objeto"></label><label>Altura do piso Y<input data-field="floor_y" type="number" step="0.01" value="${number(robot.floor_y)}"></label><label>Suavização (ms)<input data-field="smoothing_ms" type="number" min="0" value="${number(robot.smoothing_ms, 1600)}"></label><label>Posição antiga (s)<input data-field="stale_after_s" type="number" min="5" value="${number(robot.stale_after_s, 45)}"></label><label><input data-field="swap_xy" type="checkbox" ${c.swap_xy ? "checked" : ""}> Trocar X/Y</label><label><input data-field="invert_x" type="checkbox" ${c.invert_x ? "checked" : ""}> Inverter X</label><label><input data-field="invert_y" type="checkbox" ${c.invert_y ? "checked" : ""}> Inverter Y</label><label>Correção de direção °<input data-field="heading_offset" type="number" value="${number(c.heading_offset)}"></label></div><div class="ha3dRobotActions"><button data-action="selected">Usar objeto selecionado</button><button data-action="start-a">Capturar A</button><button data-action="save-a">Salvar A</button><button data-action="start-b">Capturar B</button><button data-action="save-b">Salvar B</button><button data-action="save">Salvar robô</button><button data-action="delete" class="secondary">Excluir</button></div><div class="ha3dRobotStatus" data-status></div></div>`;
   };
   proto._addRobot = async function () {
+    const status = this.shadowRoot?.querySelector("#ha3dRobotAddStatus");
+    const button = this.shadowRoot?.querySelector("#ha3dAddRobot");
+    if (button) button.disabled = true;
+    if (status) status.textContent = "Criando robô…";
     const vacuum = Object.keys(this._hass?.states || {}).find((item) => item.startsWith("vacuum.")) || "vacuum.example";
     const position = Object.keys(this._hass?.states || {}).find((item) => item.includes("vacuum_position")) || "sensor.example_position";
     const robots = [...(this._config?.robots || []), { id: id(), name: "Novo robô", vacuum_entity: vacuum, position_entity: position, display: "icon", floor_y: 0, visible_states: ["cleaning", "returning", "docked", "paused"], smoothing_ms: 1600, stale_after_s: 45, calibration: { swap_xy: false, invert_x: false, invert_y: false, heading_offset: 0 } }];
-    await this._saveConfigPatch({ robots }); this._rebuildRobots(); this._renderRobotsPanel();
+    try {
+      await this._saveConfigPatch({ robots });
+      if (!this._config?.robots?.some((robot) => robot.id === robots.at(-1).id)) {
+        throw new Error("O Home Assistant ainda não carregou o suporte a robôs. Reinicie o Home Assistant após atualizar o HA3D.");
+      }
+      this._rebuildRobots(); this._renderRobotsPanel();
+    } catch (error) {
+      if (status) status.textContent = `Não foi possível criar: ${error.message || error}`;
+      if (button) button.disabled = false;
+      console.error("HA3D: unable to add robot", error);
+    }
   };
   proto._robotFromRow = function (robot, row) {
     const get = (name) => row.querySelector(`[data-field="${name}"]`); const c = { ...(robot.calibration || {}) };

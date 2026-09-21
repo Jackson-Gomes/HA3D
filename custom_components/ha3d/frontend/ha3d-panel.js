@@ -668,4 +668,8 @@ class HA3DPanel extends HTMLElement {
   }
 }
 
+// Extension modules must use this exact Three.js module instance. Mixing two
+// module instances makes Object3D.add reject otherwise valid objects.
+HA3DPanel.HA3D_THREE = THREE;
+
 if (!customElements.get("ha3d-panel")) customElements.define("ha3d-panel", HA3DPanel);
