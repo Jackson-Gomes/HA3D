@@ -13,9 +13,30 @@ function entityParts(entity) {
   return { domain, objectId };
 }
 
-function isClimateEntity(entity) {
+function normalizeText(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+function isClimateScene(entity, state) {
+  const { domain, objectId } = entityParts(entity);
+  if (domain !== "scene") return false;
+
+  // Scene-based IR/HVAC setups stay scenes so their existing action menus keep
+  // working, but they can still participate in the Climate filter.
+  if (/(^|_)(ar|ar_condicionado|arcondicionado|air|air_conditioner|aircon|climate|hvac|ventilador|fan)(_|$)/.test(objectId)) {
+    return true;
+  }
+
+  const friendlyName = normalizeText(state?.attributes?.friendly_name);
+  return /\b(ar condicionado|air conditioner|aircon|climate|hvac|ventilador|fan)\b/.test(friendlyName);
+}
+
+function isClimateEntity(entity, state) {
   const { domain } = entityParts(entity);
-  return domain === "climate" || domain === "fan";
+  return domain === "climate" || domain === "fan" || isClimateScene(entity, state);
 }
 
 function isOpeningEntity(entity, state) {
@@ -42,7 +63,7 @@ function shouldShowEntity(entity, state, mode) {
   const { domain } = entityParts(entity);
   if (mode === "lights") return domain === "light";
   if (mode === "devices") return domain !== "light";
-  if (mode === "climate") return isClimateEntity(entity);
+  if (mode === "climate") return isClimateEntity(entity, state);
   if (mode === "openings") return isOpeningEntity(entity, state);
   return true;
 }
@@ -99,13 +120,13 @@ function installFilterBar(panel) {
   if (!root) return false;
 
   let bar = panel.shadowRoot.querySelector("#markerFilterBar");
-  if (bar?.dataset?.ha3dFilterVersion === "3") {
+  if (bar?.dataset?.ha3dFilterVersion === "4") {
     applyMarkerFilter(panel);
     return true;
   }
 
   // Replace older filter bars so their old click-handler closure cannot apply
-  // the pre-v3 filtering rules to the new buttons.
+  // earlier filtering rules to the current buttons.
   bar?.remove();
 
   if (!panel.shadowRoot.querySelector("#ha3dMarkerFilterStyleV3")) {
@@ -170,7 +191,7 @@ function installFilterBar(panel) {
   bar = document.createElement("div");
   bar.id = "markerFilterBar";
   bar.className = "glass";
-  bar.dataset.ha3dFilterVersion = "3";
+  bar.dataset.ha3dFilterVersion = "4";
   bar.setAttribute("role", "toolbar");
   bar.setAttribute("aria-label", "Filtros de marcadores");
   bar.innerHTML = `
@@ -217,8 +238,8 @@ function installOnExistingPanels() {
   }
 }
 
-if (!proto.__ha3dMarkerFilterBarV3) {
-  proto.__ha3dMarkerFilterBarV3 = true;
+if (!proto.__ha3dMarkerFilterBarV4) {
+  proto.__ha3dMarkerFilterBarV4 = true;
 
   const originalConnectedCallback = proto.connectedCallback;
   proto.connectedCallback = function () {
