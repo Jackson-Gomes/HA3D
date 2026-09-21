@@ -4,6 +4,7 @@
  * This is an independent Three.js/GLB implementation; see ../NOTICE.
  */
 import * as THREE from "https://esm.sh/three@0.180.0";
+import { TransformControls } from "https://esm.sh/three@0.180.0/examples/jsm/controls/TransformControls.js";
 
 const Panel = customElements.get("ha3d-panel");
 if (!Panel) throw new Error("HA3D panel was not registered");
@@ -38,7 +39,7 @@ if (!proto.__ha3dEasyFloorplanTestV1) {
     const style = document.createElement("style");
     style.textContent = `
       #editorButton.active{background:#176b44} #ha3dEditor{display:none;position:absolute;z-index:40;top:68px;left:12px;width:min(360px,calc(100vw - 24px));max-height:calc(100vh - 86px);overflow:auto;padding:14px;border-radius:16px}
-      #ha3dEditor.open{display:block} #ha3dEditor h3{margin:0 0 8px;font-size:15px} #ha3dEditor p{margin:5px 0 12px;font-size:12px;opacity:.72;line-height:1.4}.ha3dRow{display:grid;gap:5px;margin:10px 0}.ha3dRow label{font-size:12px;opacity:.8}.ha3dRow input,.ha3dRow select,.ha3dRow textarea{width:100%;padding:8px;border-radius:8px;border:1px solid #ffffff2b;background:#111;color:inherit;font:inherit}.ha3dRow textarea{min-height:58px;resize:vertical}.ha3dEditorActions{display:flex;gap:7px;flex-wrap:wrap}.ha3dHint{font-size:11px;opacity:.65}.ha3dSelected{outline:2px solid #4fc3f7;outline-offset:2px}
+      #ha3dEditor.open{display:block}#ha3dEditor.minimized{width:auto;max-height:none;padding:8px 10px}#ha3dEditor.minimized p,#ha3dEditor.minimized #ha3dEditorBody{display:none}#ha3dEditor h3{margin:0 0 8px;font-size:15px}#ha3dEditor.minimized h3{margin:0}#ha3dEditor p{margin:5px 0 12px;font-size:12px;opacity:.72;line-height:1.4}.ha3dRow{display:grid;gap:5px;margin:10px 0}.ha3dRow label{font-size:12px;opacity:.8}.ha3dRow input,.ha3dRow select,.ha3dRow textarea{width:100%;padding:8px;border-radius:8px;border:1px solid #ffffff2b;background:#111;color:inherit;font:inherit}.ha3dRow textarea{min-height:58px;resize:vertical}.ha3dEditorActions{display:flex;gap:7px;flex-wrap:wrap}.ha3dHint{font-size:11px;opacity:.65}.ha3dSelected{outline:2px solid #4fc3f7;outline-offset:2px}.ha3dEditorHead{display:flex;align-items:center;gap:8px}.ha3dEditorHead button{margin-left:auto;padding:5px 8px;font-size:11px}.ha3dTransform{display:flex;gap:6px;margin:8px 0}.ha3dTransform button.active{background:#176b44}
       .lightMarker.ha3dOffline{background:#303139;color:#b4b7c2;border-color:#737783;filter:grayscale(1)}.lightMarker.ha3dPressed{animation:ha3dPress .26s ease-out}@keyframes ha3dPress{50%{transform:translate(-50%,-50%) scale(.84);box-shadow:0 0 0 9px #56b7ff55}}
     `;
     this.shadowRoot.append(style);
@@ -49,7 +50,9 @@ if (!proto.__ha3dEasyFloorplanTestV1) {
     actions.prepend(editorButton);
     const editor = document.createElement("section");
     editor.id = "ha3dEditor"; editor.className = "glass";
-    editor.innerHTML = `<h3>Editor Mode</h3><p>Selecione um objeto do GLB e arraste-o no plano da câmera. As alterações ficam salvas na configuração do HA3D; o GLB original não é regravado.</p><div id="ha3dEditorBody"><p class="ha3dHint">Selecione um objeto 3D para editar.</p></div>`;
+    editor.innerHTML = `<div class="ha3dEditorHead"><h3>Editor Mode</h3><button id="ha3dCollapseEditor" class="secondary" type="button">Recolher</button></div><p>Selecione um objeto e use a tríade para mover, rotacionar ou escalar. O GLB original não é regravado.</p><div class="ha3dTransform"><button data-transform="translate" class="active" type="button">Mover</button><button data-transform="rotate" type="button">Rotacionar</button><button data-transform="scale" type="button">Escalar</button></div><div id="ha3dEditorBody"><p class="ha3dHint">Selecione um objeto 3D para editar.</p></div>`;
+    editor.querySelector("#ha3dCollapseEditor").addEventListener("click", () => { editor.classList.toggle("minimized"); editor.querySelector("#ha3dCollapseEditor").textContent = editor.classList.contains("minimized") ? "Abrir" : "Recolher"; });
+    editor.querySelectorAll("[data-transform]").forEach((button) => button.addEventListener("click", () => { this._transformControls?.setMode(button.dataset.transform); editor.querySelectorAll("[data-transform]").forEach((item) => item.classList.toggle("active", item === button)); }));
     this.shadowRoot.querySelector("#root").append(editor);
   };
 
@@ -59,6 +62,18 @@ if (!proto.__ha3dEasyFloorplanTestV1) {
     this._applySavedObjectPositions();
     this._bindAdvancedMarkers();
     return out;
+  };
+
+  const oldInitViewer = proto._initViewer;
+  proto._initViewer = function (...args) {
+    const result = oldInitViewer.apply(this, args);
+    this._transformControls = new TransformControls(this._camera, this._renderer.domElement);
+    this._transformControls.enabled = false;
+    this._transformControls.visible = false;
+    this._scene.add(this._transformControls);
+    this._transformControls.addEventListener("dragging-changed", (event) => { this._controls.enabled = !event.value; });
+    this._transformControls.addEventListener("mouseUp", () => this._persistSelectedTransform());
+    return result;
   };
 
   proto._applySavedObjectPositions = function () {
@@ -85,7 +100,20 @@ if (!proto.__ha3dEasyFloorplanTestV1) {
     this._selectedObject?.traverse?.((node) => node.userData && (node.userData.ha3dEditorSelected = false));
     this._selectedObject = object;
     object.userData.ha3dEditorSelected = true;
+    this._transformControls?.attach(object);
+    this._transformControls.enabled = true;
+    this._transformControls.visible = true;
+    const editor = this.shadowRoot.querySelector("#ha3dEditor");
+    if (editor?.classList.contains("open")) { editor.classList.add("minimized"); editor.querySelector("#ha3dCollapseEditor").textContent = "Abrir"; }
     this._renderEditorForm();
+  };
+
+  proto._persistSelectedTransform = async function () {
+    const object = this._selectedObject;
+    if (!object) return;
+    const name = object.userData?.ha3dOriginalNodeName || object.name;
+    const positions = { ...(this._config?.object_positions || {}), [name]: { position: object.position.toArray(), rotation: object.rotation.toArray(), scale: object.scale.toArray() } };
+    try { await this._saveConfigPatch({ object_positions: positions }); this._setStatus("Transformação salva"); } catch (error) { this._setStatus(`Erro ao salvar: ${error.message || error}`); }
   };
 
   proto._renderEditorForm = async function () {
@@ -263,7 +291,6 @@ if (!proto.__ha3dEasyFloorplanTestV1) {
       if (this._editorMode) {
         const object = this._pickObject(event);
         this._selectForEditor(object);
-        this._beginObjectDrag(event, object);
         return;
       }
       const object = this._pickObject(event); let node = object;
@@ -291,7 +318,7 @@ if (!proto.__ha3dEasyFloorplanTestV1) {
   const oldPick = proto._pick;
   proto._pick = function (event) {
     if (!this._editorMode) return this._handleGesturePick(event, "tap", oldPick);
-    const object = this._pickObject(event); this._selectForEditor(object); this._beginObjectDrag(event, object);
+    this._selectForEditor(this._pickObject(event));
   };
   proto._pickObject = function (event) { if (!this._model) return null; const r = this._renderer.domElement.getBoundingClientRect(); this._pointer.set(((event.clientX-r.left)/r.width)*2-1,-((event.clientY-r.top)/r.height)*2+1); this._raycaster.setFromCamera(this._pointer,this._camera); return this._raycaster.intersectObject(this._model,true)[0]?.object || null; };
   proto._beginObjectDrag = function (event, object) {
