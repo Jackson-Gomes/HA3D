@@ -17,11 +17,11 @@ from .const import (
     PANEL_URL_PATH,
     STATIC_URL,
 )
-from .http import HA3DConfigView, HA3DModelUploadView
+from .http import HA3DAreasView, HA3DConfigView, HA3DModelUploadView
 from .storage import HA3DStore
 
 
-FRONTEND_VERSION = "0.1.19"
+FRONTEND_VERSION = "0.2.0"
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -42,6 +42,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
         hass.http.register_view(HA3DConfigView(store))
         hass.http.register_view(HA3DModelUploadView(hass, store))
+        hass.http.register_view(HA3DAreasView(hass))
         runtime["http_registered"] = True
 
     model_path = Path(hass.config.path(MODEL_RELATIVE_PATH))

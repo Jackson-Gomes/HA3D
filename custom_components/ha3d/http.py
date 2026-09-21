@@ -10,6 +10,7 @@ from aiohttp import web
 
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import area_registry as ar, device_registry as dr, entity_registry as er
 
 from .const import MAX_MODEL_BYTES, MODEL_RELATIVE_PATH
 from .storage import HA3DStore
@@ -27,6 +28,39 @@ def _is_valid_bindings(value: Any) -> bool:
         if not isinstance(entity_id, str) or not _ENTITY_ID_RE.fullmatch(entity_id):
             return False
     return True
+
+
+def _is_valid_object_map(value: Any, value_validator: Any) -> bool:
+    return isinstance(value, dict) and len(value) <= 2000 and all(
+        isinstance(name, str) and 0 < len(name) <= 255 and value_validator(item)
+        for name, item in value.items()
+    )
+
+
+def _is_valid_position(value: Any) -> bool:
+    if not isinstance(value, dict) or set(value) - {"position", "rotation", "scale"}:
+        return False
+    return all(
+        isinstance(vector, list) and len(vector) == 3
+        and all(isinstance(number, (int, float)) and abs(number) < 1_000_000 for number in vector)
+        for vector in value.values()
+    )
+
+
+def _is_valid_advanced_binding(value: Any) -> bool:
+    if not isinstance(value, dict) or set(value) - {"entity_id", "anchor", "readings", "state_rules", "actions", "show_only_when_zoomed"}:
+        return False
+    entity_id = value.get("entity_id")
+    if entity_id is not None and (not isinstance(entity_id, str) or not _ENTITY_ID_RE.fullmatch(entity_id)):
+        return False
+    if "anchor" in value and (not isinstance(value["anchor"], str) or not value["anchor"] or len(value["anchor"]) > 255):
+        return False
+    for key in ("readings", "state_rules"):
+        if key in value and (not isinstance(value[key], list) or len(value[key]) > 20 or not all(isinstance(item, dict) for item in value[key])):
+            return False
+    return not ("actions" in value and not isinstance(value["actions"], dict)) and not (
+        "show_only_when_zoomed" in value and not isinstance(value["show_only_when_zoomed"], bool)
+    )
 
 
 class HA3DConfigView(HomeAssistantView):
@@ -63,8 +97,48 @@ class HA3DConfigView(HomeAssistantView):
                 return self.json({"error": "invalid_bindings"}, status=400)
             changes["bindings"] = payload["bindings"]
 
+        if "object_positions" in payload:
+            if not _is_valid_object_map(payload["object_positions"], _is_valid_position):
+                return self.json({"error": "invalid_object_positions"}, status=400)
+            changes["object_positions"] = payload["object_positions"]
+
+        if "area_bindings" in payload:
+            if not _is_valid_object_map(payload["area_bindings"], lambda value: isinstance(value, str) and 0 < len(value) <= 255):
+                return self.json({"error": "invalid_area_bindings"}, status=400)
+            changes["area_bindings"] = payload["area_bindings"]
+
+        if "advanced_bindings" in payload:
+            if not _is_valid_object_map(payload["advanced_bindings"], _is_valid_advanced_binding):
+                return self.json({"error": "invalid_advanced_bindings"}, status=400)
+            changes["advanced_bindings"] = payload["advanced_bindings"]
+
         data = await self._store.async_update(changes)
         return self.json(data)
+
+
+class HA3DAreasView(HomeAssistantView):
+    """Return Home Assistant Areas with their entities for the HA3D editor."""
+
+    url = "/api/ha3d/areas"
+    name = "api:ha3d:areas"
+    requires_auth = True
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self._hass = hass
+
+    async def get(self, request: web.Request) -> web.Response:
+        areas = ar.async_get(self._hass)
+        devices = dr.async_get(self._hass)
+        entities = er.async_get(self._hass)
+        payload = []
+        for area in areas.async_list_areas():
+            entity_ids = []
+            for entry in entities.entities.values():
+                device = devices.async_get(entry.device_id) if entry.device_id else None
+                if entry.area_id == area.id or (device and device.area_id == area.id):
+                    entity_ids.append(entry.entity_id)
+            payload.append({"id": area.id, "name": area.name, "entities": sorted(entity_ids)})
+        return self.json({"areas": sorted(payload, key=lambda item: item["name"].casefold())})
 
 
 class HA3DModelUploadView(HomeAssistantView):
