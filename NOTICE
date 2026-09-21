@@ -1,0 +1,7 @@
+HA3D includes an experimental interaction layer inspired by Easy Floorplan.
+
+Easy Floorplan is Copyright (c) 2026 Nicolas Sandller and licensed under the MIT License:
+https://github.com/nicosandller/easy-floorplan
+
+The HA3D implementation is an independent Three.js/GLB adaptation. No SVG renderer,
+floorplan geometry, furniture assets, or bundled Easy Floorplan source is included.

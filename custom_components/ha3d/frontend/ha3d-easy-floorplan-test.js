@@ -1,0 +1,236 @@
+/*
+ * Experimental editor and interaction layer for HA3D.
+ * Design concepts: Easy Floorplan (MIT, Copyright 2026 Nicolas Sandller).
+ * This is an independent Three.js/GLB implementation; see ../NOTICE.
+ */
+import * as THREE from "https://esm.sh/three@0.180.0";
+
+const Panel = customElements.get("ha3d-panel");
+if (!Panel) throw new Error("HA3D panel was not registered");
+const proto = Panel.prototype;
+const INTERACTIVE_DOMAINS = new Set(["light", "switch", "fan", "input_boolean"]);
+
+function entityDomain(entityId) { return String(entityId || "").split(".", 1)[0]; }
+function isOffline(state) { return ["unavailable", "unknown"].includes(state?.state); }
+function stateRule(config, state) {
+  const value = state?.state;
+  const numeric = Number(value);
+  return (config?.state_rules || []).find((rule) =>
+    (rule.state !== undefined && String(rule.state) === value)
+    || (Number.isFinite(numeric) && Number.isFinite(Number(rule.above)) && numeric > Number(rule.above))
+    || (Number.isFinite(numeric) && Number.isFinite(Number(rule.below)) && numeric < Number(rule.below)),
+  ) || (config?.state_rules || []).find((rule) => rule.default);
+}
+function actionFor(config, gesture, entityId) {
+  const action = config?.actions?.[gesture];
+  if (action?.action) return action;
+  if (gesture !== "tap") return { action: "none" };
+  return INTERACTIVE_DOMAINS.has(entityDomain(entityId)) ? { action: "toggle" } : { action: "more-info" };
+}
+
+if (!proto.__ha3dEasyFloorplanTestV1) {
+  proto.__ha3dEasyFloorplanTestV1 = true;
+
+  const oldRenderShell = proto._renderShell;
+  proto._renderShell = function (...args) {
+    oldRenderShell.apply(this, args);
+    const style = document.createElement("style");
+    style.textContent = `
+      #editorButton.active{background:#176b44} #ha3dEditor{display:none;position:absolute;z-index:40;top:68px;left:12px;width:min(360px,calc(100vw - 24px));max-height:calc(100vh - 86px);overflow:auto;padding:14px;border-radius:16px}
+      #ha3dEditor.open{display:block} #ha3dEditor h3{margin:0 0 8px;font-size:15px} #ha3dEditor p{margin:5px 0 12px;font-size:12px;opacity:.72;line-height:1.4}.ha3dRow{display:grid;gap:5px;margin:10px 0}.ha3dRow label{font-size:12px;opacity:.8}.ha3dRow input,.ha3dRow select,.ha3dRow textarea{width:100%;padding:8px;border-radius:8px;border:1px solid #ffffff2b;background:#111;color:inherit;font:inherit}.ha3dRow textarea{min-height:58px;resize:vertical}.ha3dEditorActions{display:flex;gap:7px;flex-wrap:wrap}.ha3dHint{font-size:11px;opacity:.65}.ha3dSelected{outline:2px solid #4fc3f7;outline-offset:2px}
+      .lightMarker.ha3dOffline{background:#303139;color:#b4b7c2;border-color:#737783;filter:grayscale(1)}.lightMarker.ha3dPressed{animation:ha3dPress .26s ease-out}@keyframes ha3dPress{50%{transform:translate(-50%,-50%) scale(.84);box-shadow:0 0 0 9px #56b7ff55}}
+    `;
+    this.shadowRoot.append(style);
+    const actions = this.shadowRoot.querySelector("#actions");
+    const editorButton = document.createElement("button");
+    editorButton.id = "editorButton"; editorButton.className = "secondary"; editorButton.type = "button"; editorButton.textContent = "Editor";
+    editorButton.addEventListener("click", () => this._toggleEditor());
+    actions.prepend(editorButton);
+    const editor = document.createElement("section");
+    editor.id = "ha3dEditor"; editor.className = "glass";
+    editor.innerHTML = `<h3>Editor Mode</h3><p>Selecione um objeto do GLB e arraste-o no plano da câmera. As alterações ficam salvas na configuração do HA3D; o GLB original não é regravado.</p><div id="ha3dEditorBody"><p class="ha3dHint">Selecione um objeto 3D para editar.</p></div>`;
+    this.shadowRoot.querySelector("#root").append(editor);
+  };
+
+  const oldLoadModel = proto._loadModel;
+  proto._loadModel = async function (...args) {
+    const out = await oldLoadModel.apply(this, args);
+    this._applySavedObjectPositions();
+    this._bindAdvancedMarkers();
+    return out;
+  };
+
+  proto._applySavedObjectPositions = function () {
+    const saved = this._config?.object_positions || {};
+    this._model?.traverse((object) => {
+      const value = saved[object.userData?.ha3dOriginalNodeName || object.name];
+      if (!value) return;
+      if (value.position) object.position.fromArray(value.position);
+      if (value.rotation) object.rotation.fromArray(value.rotation);
+      if (value.scale) object.scale.fromArray(value.scale);
+    });
+  };
+
+  proto._toggleEditor = function () {
+    if (!this._hass?.user?.is_admin) { this._setStatus("Editor disponível apenas para administradores"); return; }
+    this._editorMode = !this._editorMode;
+    this.shadowRoot.querySelector("#ha3dEditor")?.classList.toggle("open", this._editorMode);
+    this.shadowRoot.querySelector("#editorButton")?.classList.toggle("active", this._editorMode);
+    this._setStatus(this._editorMode ? "Editor ativo: selecione e arraste um objeto" : "Editor desativado");
+  };
+
+  proto._selectForEditor = function (object) {
+    if (!object) return;
+    this._selectedObject?.traverse?.((node) => node.userData && (node.userData.ha3dEditorSelected = false));
+    this._selectedObject = object;
+    object.userData.ha3dEditorSelected = true;
+    this._renderEditorForm();
+  };
+
+  proto._renderEditorForm = async function () {
+    const body = this.shadowRoot.querySelector("#ha3dEditorBody");
+    const object = this._selectedObject;
+    if (!body || !object) return;
+    const name = object.userData?.ha3dOriginalNodeName || object.name || "(sem nome)";
+    const advanced = this._config?.advanced_bindings?.[name] || {};
+    const area = this._config?.area_bindings?.[name] || "";
+    if (!this._areaData) {
+      try { this._areaData = (await this._hass.callApi("GET", "ha3d/areas")).areas || []; } catch (_error) { this._areaData = []; }
+    }
+    const options = [`<option value="">Nenhuma</option>`, ...this._areaData.map((item) => `<option value="${item.id}" ${item.id === area ? "selected" : ""}>${item.name}</option>`)].join("");
+    body.innerHTML = `<div class="ha3dRow"><label>Objeto GLB</label><input disabled value="${name}"></div>
+      <div class="ha3dRow"><label>Entidade principal</label><input id="ha3dEntity" placeholder="light.exemplo" value="${advanced.entity_id || object.userData?.ha3dEntityId || ""}"></div>
+      <div class="ha3dRow"><label>Área do Home Assistant</label><select id="ha3dArea">${options}</select></div>
+      <div class="ha3dRow"><label>Leituras extras (uma por linha: entity_id ou entity_id:atributo)</label><textarea id="ha3dReadings" placeholder="sensor.temperatura_sala\nsensor.umidade_sala">${(advanced.readings || []).map((item) => typeof item === "string" ? item : `${item.entity_id || ""}${item.attribute ? `:${item.attribute}` : ""}`).join("\n")}</textarea></div>
+      <div class="ha3dRow"><label>Regras visuais JSON (ex.: [{"state":"on","color":"#ffd54f","icon":"💡"}])</label><textarea id="ha3dRules">${JSON.stringify(advanced.state_rules || [])}</textarea></div>
+      <div class="ha3dRow"><label><input id="ha3dZoomOnly" type="checkbox" ${advanced.show_only_when_zoomed ? "checked" : ""}> Exibir somente quando próximo</label></div>
+      <div class="ha3dEditorActions"><button id="ha3dSaveObject" type="button">Salvar binding</button><button id="ha3dAddArea" class="secondary" type="button">Adicionar entidades da área</button></div>`;
+    body.querySelector("#ha3dSaveObject").addEventListener("click", () => this._saveEditorBinding(name));
+    body.querySelector("#ha3dAddArea").addEventListener("click", () => this._addAreaEntities(name));
+  };
+
+  proto._saveConfigPatch = async function (patch) {
+    this._config = await this._hass.callApi("POST", "ha3d/config", patch);
+  };
+  proto._saveEditorBinding = async function (name) {
+    const body = this.shadowRoot.querySelector("#ha3dEditorBody");
+    let rules;
+    try { rules = JSON.parse(body.querySelector("#ha3dRules").value || "[]"); if (!Array.isArray(rules)) throw Error(); } catch (_error) { this._setStatus("Regras precisam ser uma lista JSON válida"); return; }
+    const entityId = body.querySelector("#ha3dEntity").value.trim();
+    const readings = body.querySelector("#ha3dReadings").value.split("\n").map((line) => line.trim()).filter(Boolean).map((line) => { const [entity_id, attribute] = line.split(":", 2); return attribute ? { entity_id, attribute } : { entity_id }; });
+    const advanced = { ...(this._config?.advanced_bindings || {}), [name]: { entity_id: entityId || undefined, readings, state_rules: rules, show_only_when_zoomed: body.querySelector("#ha3dZoomOnly").checked } };
+    const areas = { ...(this._config?.area_bindings || {}) }; const area = body.querySelector("#ha3dArea").value; if (area) areas[name] = area; else delete areas[name];
+    try { await this._saveConfigPatch({ advanced_bindings: advanced, area_bindings: areas }); this._indexBindings(); this._clearMarkers(); this._bindModelLights(); this._bindEntityLightMarkers(); this._bindAdvancedMarkers(); this._syncLightStates(); this._setStatus("Binding salvo"); } catch (error) { this._setStatus(`Erro ao salvar: ${error.message || error}`); }
+  };
+  proto._addAreaEntities = async function (name) {
+    const areaId = this.shadowRoot.querySelector("#ha3dArea").value;
+    const area = this._areaData?.find((item) => item.id === areaId);
+    if (!area) { this._setStatus("Escolha uma área primeiro"); return; }
+    const advanced = { ...(this._config?.advanced_bindings || {}) };
+    for (const entity_id of area.entities) advanced[`__area__${area.id}__${entity_id}`] = { entity_id, anchor: name };
+    try { await this._saveConfigPatch({ advanced_bindings: advanced }); this._bindAdvancedMarkers(); this._setStatus(`${area.entities.length} entidades da área adicionadas`); } catch (error) { this._setStatus(`Erro ao salvar: ${error.message || error}`); }
+  };
+
+  proto._bindAdvancedMarkers = function () {
+    const configs = this._config?.advanced_bindings || {};
+    for (const [key, config] of Object.entries(configs)) {
+      const entity = config.entity_id;
+      if (!entity || this._lightBindings.has(entity)) continue;
+      let anchor;
+      const anchorName = config.anchor || key;
+      this._model?.traverse((object) => { if (!anchor && (object.name === anchorName || object.userData?.ha3dOriginalNodeName === anchorName)) anchor = object; });
+      if (!anchor) continue;
+      this._makeLightMarker(entity, this._hass?.states?.[entity]?.attributes?.friendly_name || entity, anchor, null);
+    }
+  };
+
+  const oldSync = proto._syncLightStates;
+  proto._syncLightStates = function (...args) {
+    oldSync.apply(this, args);
+    for (const [entity, binding] of this._lightBindings || []) {
+      const config = Object.values(this._config?.advanced_bindings || {}).find((item) => item.entity_id === entity);
+      const state = this._hass?.states?.[entity]; const rule = stateRule(config, state); const marker = binding.marker;
+      if (!marker) continue;
+      marker.classList.toggle("ha3dOffline", isOffline(state));
+      if (rule?.color) marker.style.background = rule.color; else marker.style.removeProperty("background");
+      if (rule?.icon) marker.textContent = rule.icon;
+      const readings = (config?.readings || []).map((item) => { const reading = this._hass?.states?.[item.entity_id]; return reading ? (item.attribute ? reading.attributes?.[item.attribute] : reading.state) : "—"; }).filter((value) => value !== undefined);
+      marker.title = `${binding.name}${readings.length ? ` · ${readings.join(" · ")}` : ""}${isOffline(state) ? " — indisponível" : ""}`;
+    }
+  };
+
+  const oldUpdateMarkers = proto._updateLightMarkers;
+  proto._updateLightMarkers = function (...args) {
+    oldUpdateMarkers.apply(this, args);
+    for (const [entity, binding] of this._lightBindings || []) {
+      const config = Object.values(this._config?.advanced_bindings || {}).find((item) => item.entity_id === entity);
+      if (config?.show_only_when_zoomed) {
+        const distance = this._camera.position.distanceTo(this._controls.target);
+        binding.marker.style.display = distance < (this._modelScale || 10) * 1.15 ? "block" : "none";
+      }
+    }
+  };
+
+  const oldFit = proto._fit;
+  proto._fit = function (...args) { oldFit.apply(this, args); const box = new THREE.Box3().setFromObject(this._model); this._modelScale = Math.max(...box.getSize(new THREE.Vector3()).toArray()) || 10; };
+
+  const oldWireUi = proto._wireUi;
+  proto._wireUi = function (...args) {
+    oldWireUi.apply(this, args);
+    this._renderer.domElement.addEventListener("pointerdown", (event) => {
+      if (this._editorMode) {
+        const object = this._pickObject(event);
+        this._selectForEditor(object);
+        this._beginObjectDrag(event, object);
+        return;
+      }
+      const object = this._pickObject(event); let node = object;
+      while (node && !node.userData?.ha3dEntityId) node = node.parent;
+      const entity = node?.userData?.ha3dEntityId;
+      if (!entity) return;
+      const name = node.userData?.ha3dOriginalNodeName || node.name;
+      const config = this._config?.advanced_bindings?.[name];
+      let held = false;
+      const holdTimer = setTimeout(() => { held = true; this._suppressTapUntil = performance.now() + 700; this._runEntityAction(entity, actionFor(config, "hold", entity), node); }, 650);
+      const release = () => {
+        clearTimeout(holdTimer); window.removeEventListener("pointerup", release);
+        if (held) return;
+        const now = performance.now();
+        if (now - (this._lastTapAt || 0) < 280 && this._lastTapEntity === entity) {
+          this._suppressTapUntil = now + 500;
+          this._lastTapAt = 0;
+          this._runEntityAction(entity, actionFor(config, "double_tap", entity), node);
+        } else { this._lastTapAt = now; this._lastTapEntity = entity; }
+      };
+      window.addEventListener("pointerup", release, { once: true });
+    });
+  };
+
+  const oldPick = proto._pick;
+  proto._pick = function (event) {
+    if (!this._editorMode) return this._handleGesturePick(event, "tap", oldPick);
+    const object = this._pickObject(event); this._selectForEditor(object); this._beginObjectDrag(event, object);
+  };
+  proto._pickObject = function (event) { if (!this._model) return null; const r = this._renderer.domElement.getBoundingClientRect(); this._pointer.set(((event.clientX-r.left)/r.width)*2-1,-((event.clientY-r.top)/r.height)*2+1); this._raycaster.setFromCamera(this._pointer,this._camera); return this._raycaster.intersectObject(this._model,true)[0]?.object || null; };
+  proto._beginObjectDrag = function (event, object) {
+    if (!object || !this._editorMode) return;
+    const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(this._camera.getWorldDirection(new THREE.Vector3()), object.getWorldPosition(new THREE.Vector3()));
+    const point = new THREE.Vector3(); this._raycaster.ray.intersectPlane(plane, point); const offset = object.getWorldPosition(new THREE.Vector3()).sub(point);
+    const move = (moveEvent) => { const r=this._renderer.domElement.getBoundingClientRect(); this._pointer.set(((moveEvent.clientX-r.left)/r.width)*2-1,-((moveEvent.clientY-r.top)/r.height)*2+1); this._raycaster.setFromCamera(this._pointer,this._camera); if(this._raycaster.ray.intersectPlane(plane,point)) { object.position.copy(object.parent.worldToLocal(point.clone().add(offset))); } };
+    const up = async () => { window.removeEventListener("pointermove",move); window.removeEventListener("pointerup",up); const name=object.userData?.ha3dOriginalNodeName||object.name; const positions={...(this._config?.object_positions||{}),[name]:{position:object.position.toArray(),rotation:object.rotation.toArray(),scale:object.scale.toArray()}}; try{await this._saveConfigPatch({object_positions:positions});this._setStatus("Posição salva");}catch(error){this._setStatus(`Erro ao salvar posição: ${error.message||error}`);} };
+    window.addEventListener("pointermove",move); window.addEventListener("pointerup",up,{once:true});
+  };
+  proto._handleGesturePick = async function (event, gesture, fallback) {
+    if (performance.now() < (this._suppressTapUntil || 0)) return;
+    const object = this._pickObject(event); let node = object; while (node && !node.userData?.ha3dEntityId) node = node.parent;
+    const entity = node?.userData?.ha3dEntityId; if (!entity) return fallback.call(this,event);
+    const config = this._config?.advanced_bindings?.[node.userData?.ha3dOriginalNodeName || node.name]; await this._runEntityAction(entity, actionFor(config,gesture,entity), node);
+  };
+  proto._runEntityAction = async function (entity, action, node) {
+    const marker = this._lightBindings?.get(entity)?.marker; marker?.classList.add("ha3dPressed"); setTimeout(()=>marker?.classList.remove("ha3dPressed"),300);
+    if (!action || action.action === "none") return;
+    if (action.action === "more-info") return this._openNativeMoreInfo(action.entity || entity);
+    if (action.action === "toggle") return this._hass.callService("homeassistant","toggle",{entity_id:action.entity||entity});
+    if (["call-service","perform-action"].includes(action.action)) { const [domain, service] = String(action.service || action.perform_action || "").split(".",2); if(domain&&service) return this._hass.callService(domain,service,action.data||action.service_data||{},action.target); }
+  };
+}

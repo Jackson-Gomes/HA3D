@@ -14,6 +14,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "model_revision": 0,
     "auto_bind": True,
     "bindings": {},
+    "object_positions": {},
+    "area_bindings": {},
+    "advanced_bindings": {},
 }
 
 

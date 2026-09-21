@@ -92,6 +92,28 @@ custom_components/ha3d/
     └── ha3d-panel.js    # viewer e integração com hass
 ```
 
+## Versão de teste: Editor + Easy Floorplan concepts
+
+Na branch `experimental/easy-floorplan-test` há uma versão de teste que mantém o
+renderer Three.js/GLB e acrescenta, para administradores:
+
+- **Editor Mode**: seleção e arraste de objetos do GLB no plano da câmera. O GLB
+  nunca é modificado; posição, rotação e escala são persistidas separadamente.
+- **HA Areas**: associação de um objeto a uma Area e botão para descobrir e
+  adicionar as entidades registradas naquela Area como marcadores.
+- **Binding avançado**: entidade principal, leituras extras, regras de estado
+  para cor/ícone e visibilidade somente quando a câmera está próxima.
+- **Ações Lovelace-like**: toque, toque longo e toque duplo, com `more-info`,
+  `toggle`, `call-service` e `perform-action` suportados no formato armazenado.
+  O comportamento padrão é conservador: só luzes, switches, ventiladores e
+  input_booleans alternam no toque; os demais abrem More Info.
+- Estados `unavailable` e `unknown` ficam acinzentados e explicitamente
+  identificados. O clique recebe uma animação sutil, mas a aparência de estado
+  só é atualizada pelos estados efetivamente recebidos do Home Assistant.
+
+Os conceitos de UX foram inspirados pelo Easy Floorplan, sob MIT. Veja `NOTICE`.
+Não há renderer SVG, código ou assets do projeto incorporados ao HA3D.
+
 ## Próximas etapas
 
 1. editor visual objeto ↔ entidade;
