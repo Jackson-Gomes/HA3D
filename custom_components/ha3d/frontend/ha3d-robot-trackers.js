@@ -16,6 +16,13 @@ const id = () => `robot-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const number = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
 const offline = (state) => !state || ["unknown", "unavailable"].includes(state.state);
+const errorText = (error) => {
+  if (typeof error === "string") return error;
+  if (error?.body?.error) return error.body.error;
+  if (error?.error) return error.error;
+  if (error?.message) return error.message;
+  try { return JSON.stringify(error); } catch (_ignored) { return String(error); }
+};
 
 function getPosition(hass, entityId) {
   const state = hass?.states?.[entityId];
@@ -188,7 +195,7 @@ if (!proto.__ha3dRobotTrackersV1) {
       }
       this._rebuildRobots(); this._renderRobotsPanel();
     } catch (error) {
-      if (status) status.textContent = `Não foi possível criar: ${error.message || error}`;
+      if (status) status.textContent = `Não foi possível criar: ${errorText(error)}`;
       if (button) button.disabled = false;
       console.error("HA3D: unable to add robot", error);
     }

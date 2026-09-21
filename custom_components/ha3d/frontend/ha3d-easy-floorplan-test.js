@@ -144,9 +144,10 @@ if (!proto.__ha3dEasyFloorplanTestV1) {
   };
 
   proto._saveConfigPatch = async function (patch) {
-    // Home Assistant's callApi accepts query parameters as its third argument
-    // and JSON body as its fourth. Editor data must be sent as the latter.
-    this._config = await this._hass.callApi("POST", "ha3d/config", undefined, patch);
+    // HA's current callApi contract sends POST JSON in its third argument.
+    // Passing it as a fourth argument silently drops the body, leaving the
+    // server unable to validate or persist editor/robot settings.
+    this._config = await this._hass.callApi("POST", "ha3d/config", patch);
   };
 
   proto._updateEntityChoices = function (areaId = "") {
