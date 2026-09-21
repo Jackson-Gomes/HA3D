@@ -20,3 +20,4 @@ import "./ha3d-xray-open-alert.js?v=xray-open-alert-1";
 import "./ha3d-native-state-icons.js?v=native-state-icons-1";
 import "./ha3d-custom-view-drawer.js?v=custom-view-drawer-1";
 import "./ha3d-camera-lens.js?v=camera-fisheye-1";
+import "./ha3d-icon-standard.js?v=mdi-standard-2";
