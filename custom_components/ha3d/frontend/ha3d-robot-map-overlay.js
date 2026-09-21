@@ -105,7 +105,8 @@ function pixelToFloor(position, calibration, settings, imageSize) {
   const scale = num(settings.scale, DEFAULTS.scale);
   const u = (px - imageSize.width / 2) * scale;
   const v = (py - imageSize.height / 2) * scale;
-  const r = THREE.MathUtils.degToRad(num(settings.rotation));
+  // PlaneGeometry is flipped onto XZ, so map-pixel rotation uses the opposite sign.
+  const r = THREE.MathUtils.degToRad(-num(settings.rotation));
   const cos = Math.cos(r);
   const sin = Math.sin(r);
   return {
