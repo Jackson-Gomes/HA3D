@@ -1,4 +1,4 @@
-// Bottom marker filter bar: lights, devices, and all/none.
+// Bottom marker filter bar: lights, devices, climate, openings, and all/none.
 const Panel = customElements.get("ha3d-panel");
 if (!Panel) throw new Error("HA3D panel was not registered");
 
@@ -8,12 +8,42 @@ function ensureFilterState(panel) {
   if (!panel._ha3dMarkerFilterMode) panel._ha3dMarkerFilterMode = "all";
 }
 
-function shouldShowEntity(entity, mode) {
+function entityParts(entity) {
+  const [domain = "", objectId = ""] = String(entity || "").toLowerCase().split(".", 2);
+  return { domain, objectId };
+}
+
+function isClimateEntity(entity) {
+  const { domain } = entityParts(entity);
+  return domain === "climate" || domain === "fan";
+}
+
+function isOpeningEntity(entity, state) {
+  const { domain, objectId } = entityParts(entity);
+  const deviceClass = String(state?.attributes?.device_class || "").toLowerCase();
+
+  if (domain === "binary_sensor") {
+    if (["door", "garage_door", "opening", "window"].includes(deviceClass)) return true;
+    return /(^|_)(porta|janela|door|window)(_|$)/.test(objectId);
+  }
+
+  if (domain === "cover") {
+    if (["door", "garage", "window"].includes(deviceClass)) return true;
+    return /(^|_)(porta|janela|door|window)(_|$)/.test(objectId);
+  }
+
+  return false;
+}
+
+function shouldShowEntity(entity, state, mode) {
   if (mode === "none") return false;
   if (mode === "all") return true;
-  const domain = String(entity || "").split(".", 1)[0];
+
+  const { domain } = entityParts(entity);
   if (mode === "lights") return domain === "light";
   if (mode === "devices") return domain !== "light";
+  if (mode === "climate") return isClimateEntity(entity);
+  if (mode === "openings") return isOpeningEntity(entity, state);
   return true;
 }
 
@@ -33,7 +63,12 @@ function syncFilterButtons(panel) {
   const allNone = bar.querySelector('[data-marker-filter="allnone"]');
   if (allNone) {
     const showAllAction = mode !== "all";
-    allNone.textContent = showAllAction ? "◉" : "○";
+    const icon = allNone.querySelector("ha-icon");
+    if (icon) {
+      icon.setAttribute("icon", showAllAction ? "mdi:eye-outline" : "mdi:eye-off-outline");
+    } else {
+      allNone.textContent = showAllAction ? "◉" : "○";
+    }
     allNone.title = showAllAction ? "Mostrar todos os marcadores" : "Ocultar todos os marcadores";
     allNone.setAttribute("aria-label", allNone.title);
   }
@@ -44,9 +79,10 @@ function applyMarkerFilter(panel) {
   if (panel._cinematicActive) return;
 
   const mode = panel._ha3dMarkerFilterMode;
+  const states = panel._hass?.states || {};
   for (const [entity, binding] of panel._lightBindings?.entries?.() || []) {
     if (!binding?.marker) continue;
-    binding.marker.style.display = shouldShowEntity(entity, mode) ? "" : "none";
+    binding.marker.style.display = shouldShowEntity(entity, states[entity], mode) ? "" : "none";
   }
 
   syncFilterButtons(panel);
@@ -63,70 +99,86 @@ function installFilterBar(panel) {
   if (!root) return false;
 
   let bar = panel.shadowRoot.querySelector("#markerFilterBar");
-  if (bar) {
+  if (bar?.dataset?.ha3dFilterVersion === "3") {
     applyMarkerFilter(panel);
     return true;
   }
 
-  const style = document.createElement("style");
-  style.textContent = `
-    #markerFilterBar{
-      position:absolute;
-      left:50%;
-      bottom:max(14px,env(safe-area-inset-bottom));
-      transform:translateX(-50%);
-      z-index:31;
-      display:flex;
-      align-items:center;
-      gap:6px;
-      padding:6px;
-      border-radius:16px;
-      background:color-mix(in srgb,var(--card-background-color,#15171d) 88%,transparent);
-      border:1px solid rgba(255,255,255,.12);
-      box-shadow:0 8px 28px rgba(0,0,0,.30);
-      backdrop-filter:blur(16px);
-      -webkit-backdrop-filter:blur(16px);
-      pointer-events:auto;
-      transition:opacity .22s ease;
-    }
-    .markerFilterButton{
-      width:40px;
-      height:36px;
-      min-height:36px;
-      padding:0;
-      display:grid;
-      place-items:center;
-      border-radius:11px;
-      border:1px solid transparent;
-      background:transparent;
-      color:var(--primary-text-color,#fff);
-      font-size:19px;
-      line-height:1;
-      font-weight:650;
-      box-shadow:none;
-    }
-    .markerFilterButton:hover{background:rgba(255,255,255,.08)}
-    .markerFilterButton.active{
-      background:color-mix(in srgb,var(--primary-color,#03a9f4) 28%,transparent);
-      border-color:color-mix(in srgb,var(--primary-color,#03a9f4) 62%,transparent);
-    }
-    #root.ha3d-cinematic-active #markerFilterBar{opacity:0;pointer-events:none}
-    @media(max-width:600px){
-      #markerFilterBar{bottom:max(9px,env(safe-area-inset-bottom));gap:3px;padding:4px}
-      .markerFilterButton{width:38px;height:34px;min-height:34px;font-size:18px}
-    }
-  `;
-  panel.shadowRoot.appendChild(style);
+  // Replace older filter bars so their old click-handler closure cannot apply
+  // the pre-v3 filtering rules to the new buttons.
+  bar?.remove();
+
+  if (!panel.shadowRoot.querySelector("#ha3dMarkerFilterStyleV3")) {
+    const style = document.createElement("style");
+    style.id = "ha3dMarkerFilterStyleV3";
+    style.textContent = `
+      #markerFilterBar{
+        position:absolute;
+        left:50%;
+        bottom:max(14px,env(safe-area-inset-bottom));
+        transform:translateX(-50%);
+        z-index:31;
+        display:flex;
+        align-items:center;
+        gap:6px;
+        padding:6px;
+        border-radius:16px;
+        background:color-mix(in srgb,var(--card-background-color,#15171d) 88%,transparent);
+        border:1px solid rgba(255,255,255,.12);
+        box-shadow:0 8px 28px rgba(0,0,0,.30);
+        backdrop-filter:blur(16px);
+        -webkit-backdrop-filter:blur(16px);
+        pointer-events:auto;
+        transition:opacity .22s ease;
+      }
+      .markerFilterButton{
+        width:40px;
+        height:36px;
+        min-height:36px;
+        padding:0;
+        display:grid;
+        place-items:center;
+        border-radius:11px;
+        border:1px solid transparent;
+        background:transparent;
+        color:var(--primary-text-color,#fff);
+        font-size:19px;
+        line-height:1;
+        font-weight:650;
+        box-shadow:none;
+      }
+      .markerFilterButton ha-icon{
+        width:22px;
+        height:22px;
+        pointer-events:none;
+        --mdc-icon-size:22px;
+      }
+      .markerFilterButton:hover{background:rgba(255,255,255,.08)}
+      .markerFilterButton.active{
+        background:color-mix(in srgb,var(--primary-color,#03a9f4) 28%,transparent);
+        border-color:color-mix(in srgb,var(--primary-color,#03a9f4) 62%,transparent);
+      }
+      #root.ha3d-cinematic-active #markerFilterBar{opacity:0;pointer-events:none}
+      @media(max-width:600px){
+        #markerFilterBar{bottom:max(9px,env(safe-area-inset-bottom));gap:3px;padding:4px}
+        .markerFilterButton{width:38px;height:34px;min-height:34px;font-size:18px}
+      }
+    `;
+    panel.shadowRoot.appendChild(style);
+  }
 
   bar = document.createElement("div");
   bar.id = "markerFilterBar";
   bar.className = "glass";
+  bar.dataset.ha3dFilterVersion = "3";
   bar.setAttribute("role", "toolbar");
   bar.setAttribute("aria-label", "Filtros de marcadores");
   bar.innerHTML = `
-    <button class="markerFilterButton" data-marker-filter="lights" type="button" title="Lâmpadas" aria-label="Lâmpadas">💡</button>
-    <button class="markerFilterButton" data-marker-filter="devices" type="button" title="Aparelhos" aria-label="Aparelhos">🔌</button>
-    <button class="markerFilterButton" data-marker-filter="allnone" type="button" title="Ocultar todos os marcadores" aria-label="Ocultar todos os marcadores">○</button>
+    <button class="markerFilterButton" data-marker-filter="lights" type="button" title="Lâmpadas" aria-label="Lâmpadas"><ha-icon icon="mdi:lightbulb-group-outline"></ha-icon></button>
+    <button class="markerFilterButton" data-marker-filter="devices" type="button" title="Aparelhos" aria-label="Aparelhos"><ha-icon icon="mdi:power-plug-outline"></ha-icon></button>
+    <button class="markerFilterButton" data-marker-filter="climate" type="button" title="Climatização" aria-label="Climatização"><ha-icon icon="mdi:hvac"></ha-icon></button>
+    <button class="markerFilterButton" data-marker-filter="openings" type="button" title="Portas e janelas" aria-label="Portas e janelas"><ha-icon icon="mdi:door-open"></ha-icon></button>
+    <button class="markerFilterButton" data-marker-filter="allnone" type="button" title="Ocultar todos os marcadores" aria-label="Ocultar todos os marcadores"><ha-icon icon="mdi:eye-off-outline"></ha-icon></button>
   `;
 
   bar.addEventListener("click", (event) => {
@@ -143,7 +195,6 @@ function installFilterBar(panel) {
     setFilterMode(panel, filter);
   });
 
-  // Same overlay layer as the existing Vistas controls, but anchored at bottom.
   root.appendChild(bar);
   applyMarkerFilter(panel);
   return true;
@@ -166,8 +217,8 @@ function installOnExistingPanels() {
   }
 }
 
-if (!proto.__ha3dMarkerFilterBarV2) {
-  proto.__ha3dMarkerFilterBarV2 = true;
+if (!proto.__ha3dMarkerFilterBarV3) {
+  proto.__ha3dMarkerFilterBarV3 = true;
 
   const originalConnectedCallback = proto.connectedCallback;
   proto.connectedCallback = function () {
@@ -208,9 +259,6 @@ if (!proto.__ha3dMarkerFilterBarV2) {
     return result;
   };
 
-  // ha3d-panel can be upgraded before this late-loaded module executes.
-  // Search through Home Assistant's open shadow roots and install on the
-  // already-connected panel instance as well as future instances.
   queueMicrotask(installOnExistingPanels);
   requestAnimationFrame(installOnExistingPanels);
   setTimeout(installOnExistingPanels, 250);
