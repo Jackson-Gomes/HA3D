@@ -21,7 +21,7 @@ from .http import HA3DAreasView, HA3DConfigView, HA3DModelUploadView
 from .storage import HA3DStore
 
 
-FRONTEND_VERSION = "0.2.6"
+FRONTEND_VERSION = "0.2.7"
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
