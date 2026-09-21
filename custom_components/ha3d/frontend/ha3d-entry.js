@@ -22,4 +22,4 @@ import "./ha3d-custom-view-drawer.js?v=custom-view-drawer-1";
 import "./ha3d-camera-lens.js?v=camera-fisheye-1";
 import "./ha3d-icon-standard.js?v=mdi-standard-2";
 import "./ha3d-easy-floorplan-test.js?v=easy-floorplan-test-1";
-import "./ha3d-robot-trackers.js?v=robot-trackers-1";
+import "./ha3d-robot-trackers.js?v=robot-trackers-2";
