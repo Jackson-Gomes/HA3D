@@ -5,3 +5,9 @@ https://github.com/nicosandller/easy-floorplan
 
 The HA3D implementation is an independent Three.js/GLB adaptation. No SVG renderer,
 floorplan geometry, furniture assets, or bundled Easy Floorplan source is included.
+
+Robot tracker UX and coordinate-calibration research also referenced Home Assistant
+3D Floorplan Extended by gerhardhomeassistant (ISC License):
+https://github.com/gerhardhomeassistant/home-assistant-3d-floorplan-ext
+
+HA3D's robot implementation is independent and contains no copied source or assets.

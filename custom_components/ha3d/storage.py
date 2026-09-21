@@ -17,6 +17,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "object_positions": {},
     "area_bindings": {},
     "advanced_bindings": {},
+    "robots": [],
 }
 
 

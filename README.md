@@ -111,6 +111,26 @@ renderer Three.js/GLB e acrescenta, para administradores:
   identificados. O clique recebe uma animação sutil, mas a aparência de estado
   só é atualizada pelos estados efetivamente recebidos do Home Assistant.
 
+## Robôs no cenário 3D
+
+A versão de teste inclui um menu **Robôs** independente dos bindings comuns.
+Cada robô combina uma entidade `vacuum.*` (estado) com uma entidade de posição
+que exponha `x`, `y` e `a`/`heading` — como os sensores do Xiaomi Cloud Map
+Extractor. Também aceita esses valores como JSON no estado ou dentro de
+`vacuum_position`/`position`.
+
+1. Abra **Robôs → Adicionar robô** e escolha as duas entidades.
+2. Escolha o ícone 3D padrão ou, no **Editor**, selecione um objeto do GLB e use
+   **Usar objeto selecionado**.
+3. Com o robô parado num local conhecido, clique em **Capturar A**, arraste a
+   esfera laranja pelo cenário usando a tríade do Editor e clique em **Salvar A**.
+4. Repita num segundo local, distante do primeiro, com o ponto B roxo.
+
+O HA3D calcula escala, rotação e deslocamento. Há ajustes para trocar/inverter
+eixos, altura, direção do modelo, suavização e tempo máximo para uma posição.
+Quando a posição fica antiga ou indisponível, o robô é ocultado em vez de ser
+movido para uma posição inventada.
+
 Os conceitos de UX foram inspirados pelo Easy Floorplan, sob MIT. Veja `NOTICE`.
 Não há renderer SVG, código ou assets do projeto incorporados ao HA3D.
 

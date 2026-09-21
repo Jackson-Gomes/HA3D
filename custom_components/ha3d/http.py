@@ -69,6 +69,56 @@ def _is_valid_advanced_binding(value: Any) -> bool:
     )
 
 
+def _is_entity_id(value: Any) -> bool:
+    return isinstance(value, str) and bool(_ENTITY_ID_RE.fullmatch(value))
+
+
+def _is_number(value: Any, limit: float = 1_000_000) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and abs(value) < limit
+
+
+def _is_valid_robot(value: Any) -> bool:
+    """Validate the intentionally small, frontend-owned robot tracker schema."""
+    if not isinstance(value, dict):
+        return False
+    allowed = {
+        "id", "name", "vacuum_entity", "position_entity", "object_name", "display",
+        "floor_y", "visible_states", "smoothing_ms", "stale_after_s", "calibration",
+    }
+    if set(value) - allowed or not isinstance(value.get("id"), str) or not value["id"]:
+        return False
+    if len(value["id"]) > 100 or not _is_entity_id(value.get("vacuum_entity")) or not _is_entity_id(value.get("position_entity")):
+        return False
+    if "name" in value and (not isinstance(value["name"], str) or len(value["name"]) > 120):
+        return False
+    if "object_name" in value and (not isinstance(value["object_name"], str) or len(value["object_name"]) > 255):
+        return False
+    if value.get("display", "icon") not in {"icon", "object"}:
+        return False
+    for key in ("floor_y", "smoothing_ms", "stale_after_s"):
+        if key in value and not _is_number(value[key]):
+            return False
+    if "visible_states" in value and (
+        not isinstance(value["visible_states"], list)
+        or len(value["visible_states"]) > 20
+        or not all(isinstance(item, str) and len(item) <= 80 for item in value["visible_states"])
+    ):
+        return False
+    calibration = value.get("calibration", {})
+    if not isinstance(calibration, dict):
+        return False
+    calibration_allowed = {"raw_a", "model_a", "raw_b", "model_b", "swap_xy", "invert_x", "invert_y", "heading_offset"}
+    if set(calibration) - calibration_allowed:
+        return False
+    for key in ("raw_a", "model_a", "raw_b", "model_b"):
+        if key in calibration and (not isinstance(calibration[key], list) or len(calibration[key]) != 2 or not all(_is_number(number) for number in calibration[key])):
+            return False
+    for key in ("swap_xy", "invert_x", "invert_y"):
+        if key in calibration and not isinstance(calibration[key], bool):
+            return False
+    return "heading_offset" not in calibration or _is_number(calibration["heading_offset"])
+
+
 class HA3DConfigView(HomeAssistantView):
     """Read and update generic HA3D configuration."""
 
@@ -117,6 +167,11 @@ class HA3DConfigView(HomeAssistantView):
             if not _is_valid_object_map(payload["advanced_bindings"], _is_valid_advanced_binding):
                 return self.json({"error": "invalid_advanced_bindings"}, status=400)
             changes["advanced_bindings"] = payload["advanced_bindings"]
+
+        if "robots" in payload:
+            if not isinstance(payload["robots"], list) or len(payload["robots"]) > 20 or not all(_is_valid_robot(item) for item in payload["robots"]):
+                return self.json({"error": "invalid_robots"}, status=400)
+            changes["robots"] = payload["robots"]
 
         data = await self._store.async_update(changes)
         return self.json(data)
