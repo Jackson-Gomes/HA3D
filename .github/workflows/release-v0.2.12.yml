@@ -15,4 +15,9 @@ jobs:
       - name: Publish v0.2.12
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release view v0.2.12 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create v0.2.12 --repo "$GITHUB_REPOSITORY" --target "b0eb9ae243a07040a43dbd5b473e70ffaa484444" --title "HA3D v0.2.12" --notes "Small robot map polish: icon/selected GLB geometry now follows the configured Xiaomi map height, the map overlay starts hidden after upgrade instead of appearing automatically, and orphan/ghost Xiaomi map planes are removed. The map-driven tracking flow from v0.2.11 remains unchanged."
+        run: >-
+          gh release view v0.2.12 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 ||
+          gh release create v0.2.12 --repo "$GITHUB_REPOSITORY"
+          --target "b0eb9ae243a07040a43dbd5b473e70ffaa484444"
+          --title "HA3D v0.2.12"
+          --notes "Small robot map polish. Icon/selected GLB geometry now follows the configured Xiaomi map height; the map overlay starts hidden after upgrade instead of appearing automatically; orphan/ghost Xiaomi map planes are removed. The map-driven tracking flow from v0.2.11 remains unchanged."
