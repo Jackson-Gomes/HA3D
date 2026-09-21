@@ -17,7 +17,7 @@ valid = namespace["_is_valid_robot"]
 
 class RobotSchemaTests(unittest.TestCase):
     def setUp(self):
-        self.robot = {"id": "test", "vacuum_entity": "vacuum.test", "position_entity": "sensor.position", "floor_plane": "xz", "floor_y": 0.6, "calibration": {"points": [{"raw": [0, 0], "model": [1, 2]}, {"raw": [1000, 0], "model": [2, 2]}, {"raw": [0, 1000], "model": [1, 3]}]}}
+        self.robot = {"id": "test", "vacuum_entity": "vacuum.test", "position_entity": "sensor.position", "floor_plane": "xz", "floor_y": 0.6, "remote_pulse_ms": 1600, "remote_settle_ms": 6000, "calibration": {"points": [{"raw": [0, 0], "model": [1, 2]}, {"raw": [1000, 0], "model": [2, 2]}, {"raw": [0, 1000], "model": [1, 3]}]}}
 
     def test_new_points_and_planes(self):
         for plane in ("xz", "xy", "yz"):

@@ -16,6 +16,14 @@ const id = () => `robot-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const number = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
 const offline = (state) => !state || ["unknown", "unavailable"].includes(state.state);
+const H50 = {
+  name: "Xiaomi H50",
+  vacuum: "vacuum.xiaomi_us_1213069013_ov43gb",
+  position: "sensor.xiaomi_robot_vacuum_h50_vacuum_position",
+  enterRemote: "button.xiaomi_us_1213069013_ov43gb_enter_remote_a_2_28",
+  exitRemote: "button.xiaomi_us_1213069013_ov43gb_exit_remote_a_2_29",
+  remoteControl: "notify.xiaomi_us_1213069013_ov43gb_remote_control_a_2_26",
+};
 const errorText = (error) => {
   if (typeof error === "string") return error;
   if (error?.body?.error) return error.body.error;
@@ -47,6 +55,16 @@ function preferredPositionEntity(hass, current = "") {
     const score = (entity) => (entity.endsWith("_vacuum_position") ? 3 : 0) + (/vacuum.*position/i.test(entity) ? 2 : 0) + (/xiaomi_robot_vacuum/i.test(entity) ? 1 : 0);
     return score(b) - score(a) || a.localeCompare(b);
   })[0] || current || "sensor.example_position";
+}
+
+function h50RobotConfig(robot = {}) {
+  return {
+    ...robot,
+    name: robot.name || H50.name,
+    vacuum_entity: H50.vacuum,
+    position_entity: H50.position,
+    visible_states: robot.visible_states || ["cleaning", "returning", "docked", "paused", "idle"],
+  };
 }
 
 function normalized(point, calibration) {
@@ -145,6 +163,16 @@ function makeIcon(name) {
   return root;
 }
 
+function makeCalibrationArrow() {
+  const root = new THREE.Group(); root.userData.ha3dRobotCalibration = true;
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.07, 24), new THREE.MeshBasicMaterial({ color: 0xffa726, depthTest: false, depthWrite: false, transparent: true, opacity: 0.9 }));
+  body.position.y = 0.04; root.add(body);
+  const arrow = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.28, 4), new THREE.MeshBasicMaterial({ color: 0xffffff, depthTest: false, depthWrite: false, transparent: true, opacity: 0.95 }));
+  arrow.rotation.x = Math.PI / 2; arrow.position.set(0, 0.11, -0.24); root.add(arrow);
+  root.traverse((node) => { node.renderOrder = 10000; node.userData.ha3dRobotCalibration = true; });
+  return root;
+}
+
 function findObject(model, name) {
   let result;
   model?.traverse((item) => { if (!result && (item.name === name || item.userData?.ha3dOriginalNodeName === name)) result = item; });
@@ -189,7 +217,8 @@ if (!proto.__ha3dRobotTrackersV1) {
       if (entry.object && entry.base) { entry.object.position.copy(entry.base.position); entry.object.rotation.copy(entry.base.rotation); }
     }
     this._robotEntries = new Map();
-    for (const config of this._config?.robots || []) {
+    for (const original of this._config?.robots || []) {
+      const config = h50RobotConfig(original);
       const entry = { config, target: new THREE.Vector3(), lastFrame: performance.now(), lastReceived: 0 };
       if (config.display === "object" && config.object_name) {
         entry.object = findObject(this._model, config.object_name);
@@ -252,27 +281,28 @@ if (!proto.__ha3dRobotTrackersV1) {
     const panel = this.shadowRoot.querySelector("#ha3dRobots"); if (!panel) return;
     // Closing/reopening the menu must not discard an unsaved calibration.
     if (this._robotCalibration || this._robotSaving) return;
-    const robots = this._config?.robots || [];
-    panel.innerHTML = `<div class="ha3dEditorHead"><h3>Robôs</h3></div><p class="ha3dRobotHint">A esfera parte da posição estimada pelo sensor. Corrija, confirme A, mova o robô físico e adicione B, C… Use pelo menos três locais formando um triângulo. Salve no final: escala, rotação e eixos são ajustados automaticamente.</p><div class="ha3dRobotActions"><button id="ha3dAddRobot" type="button">Adicionar robô</button></div><div class="ha3dRobotStatus" id="ha3dRobotAddStatus"></div>${robots.map((robot) => this._robotRow(robot)).join("") || '<p class="ha3dRobotHint">Nenhum robô configurado.</p>'}`;
+    const robots = (this._config?.robots || []).map(h50RobotConfig);
+    panel.innerHTML = `<div class="ha3dEditorHead"><h3>Robôs</h3></div><p class="ha3dRobotHint">Suporte experimental fechado para Xiaomi H50. A esfera parte da posição real do H50; confirme A, use o pulso assistido para mover um passo curto e confirme B/C. O pulso sempre solta o movimento e sai do modo remoto.</p><div class="ha3dRobotActions"><button id="ha3dAddRobot" type="button">Adicionar Xiaomi H50</button></div><div class="ha3dRobotStatus" id="ha3dRobotAddStatus"></div>${robots.map((robot) => this._robotRow(robot)).join("") || '<p class="ha3dRobotHint">Nenhum Xiaomi H50 configurado.</p>'}`;
     panel.querySelector("#ha3dAddRobot").addEventListener("click", () => this._addRobot());
     robots.forEach((robot) => this._wireRobotRow(robot));
   };
   proto._robotRow = function (robot) {
+    robot = h50RobotConfig(robot);
     const c = robot.calibration || {}; const problem = calibrationProblem(c); const fit = transformFor(c);
     const points = calibrationPoints(c);
     return `<div class="ha3dRobotRow" data-robot-id="${esc(robot.id)}">
       <strong>${esc(robot.name || "Robô")}</strong>
-      <div class="ha3dRobotMeta">${problem ? esc(problem) : `Calibrado · ${points.length} pontos salvos · erro médio ${fit.error.toFixed(3)} unidades 3D`} · ${esc(robot.position_entity)}</div>
-      <details data-robot-settings open><summary>Entidades, plano e altura do piso</summary><div class="ha3dRobotGrid">
+      <div class="ha3dRobotMeta">${problem ? esc(problem) : `Calibrado · ${points.length} pontos salvos · erro médio ${fit.error.toFixed(3)} unidades 3D`} · ${esc(H50.position)}</div>
+      <details data-robot-settings open><summary>Xiaomi H50, plano e altura do piso</summary><div class="ha3dRobotGrid">
         <label>Nome<input data-field="name" value="${esc(robot.name || "")}"></label>
         <label>Representação<select data-field="display"><option value="icon" ${robot.display !== "object" ? "selected" : ""}>Ícone 3D</option><option value="object" ${robot.display === "object" ? "selected" : ""}>Objeto do GLB</option></select></label>
-        <label>Entidade do robô<select data-field="vacuum_entity">${this._robotChoices(robot.vacuum_entity)}</select></label>
-        <label>Sensor de posição<select data-field="position_entity">${this._robotChoices(robot.position_entity)}</select></label>
         <label>Objeto GLB<input data-field="object_name" value="${esc(robot.object_name || "")}" placeholder="Nome do objeto"></label>
         <label>Plano do piso<select data-field="floor_plane">${["xz", "xy", "yz"].map((plane) => `<option value="${plane}" ${(robot.floor_plane || "xz") === plane ? "selected" : ""}>${plane.toUpperCase()} · altura ${floorAxes(plane)[2].toUpperCase()}${plane === "xz" ? " (padrão)" : ""}</option>`).join("")}</select></label>
         <label>Altura fixa do piso<input data-field="floor_y" type="number" step="any" value="${number(robot.floor_y)}"></label>
         <label>Suavização (ms)<input data-field="smoothing_ms" type="number" min="0" value="${number(robot.smoothing_ms, 1600)}"></label>
         <label>Posição antiga (s)<input data-field="stale_after_s" type="number" min="5" value="${number(robot.stale_after_s, 45)}"></label>
+        <label>Pulso remoto (ms)<input data-field="remote_pulse_ms" type="number" min="500" max="4000" step="100" value="${number(robot.remote_pulse_ms, 1600)}"></label>
+        <label>Espera do sensor (ms)<input data-field="remote_settle_ms" type="number" min="1000" max="20000" step="500" value="${number(robot.remote_settle_ms, 6000)}"></label>
         <label>Correção de direção °<input data-field="heading_offset" type="number" value="${number(c.heading_offset)}"></label>
       </div></details>
       <div class="ha3dRobotStatus" data-live></div>
@@ -282,7 +312,8 @@ if (!proto.__ha3dRobotTrackersV1) {
         <strong data-cal-title>Ajuste manual</strong><p class="ha3dRobotHint" data-cal-hint></p>
         <label style="display:flex"><input type="checkbox" data-show-grid checked> Mostrar grade no piso</label>
         ${["x", "y", "z"].map((axis) => `<label>${axis.toUpperCase()}<input type="range" data-cal-axis="${axis}" aria-label="Ajustar ${axis.toUpperCase()}"><input type="number" step="any" data-cal-number="${axis}" aria-label="Valor ${axis.toUpperCase()}"></label>`).join("")}
-        <div class="ha3dRobotActions"><button data-action="confirm">Confirmar ponto A</button><button data-action="next" hidden>Adicionar ponto B</button></div>
+        <div class="ha3dRobotActions"><button data-action="confirm">Confirmar ponto A</button><button data-action="auto-step" class="secondary">Pulso e capturar próximo ponto</button><button data-action="next" hidden>Capturar posição atual</button></div>
+        <div class="ha3dRobotActions" data-remote-controls><button data-remote-pulse="forward" type="button">Frente</button><button data-remote-pulse="left" type="button" class="secondary">Girar esquerda</button><button data-remote-pulse="right" type="button" class="secondary">Girar direita</button><button data-action="remote-stop" type="button" class="secondary">Parar / sair remoto</button></div>
         <div data-cal-points class="ha3dRobotActions"></div><p class="ha3dRobotHint" data-cal-fit></p>
         <div class="ha3dRobotActions"><button data-action="apply">Salvar calibração</button><button data-action="cancel" class="secondary">Cancelar ajuste</button></div>
       </div>
@@ -295,9 +326,13 @@ if (!proto.__ha3dRobotTrackersV1) {
     if (this._robotSaving || this._robotCalibration) { if (status) status.textContent = "Salve ou cancele o ajuste aberto primeiro."; return; }
     this._setRobotBusy(true);
     if (status) status.textContent = "Criando robô…";
-    const vacuum = Object.keys(this._hass?.states || {}).find((item) => item.startsWith("vacuum.")) || "vacuum.example";
-    const position = preferredPositionEntity(this._hass);
-    const robots = [...(this._config?.robots || []), { id: id(), name: "Novo robô", vacuum_entity: vacuum, position_entity: position, display: "icon", floor_y: 0, visible_states: ["cleaning", "returning", "docked", "paused", "idle"], smoothing_ms: 1600, stale_after_s: 45, calibration: { points: [], heading_offset: 0 } }];
+    const existing = this._config?.robots || [];
+    if (existing.some((robot) => h50RobotConfig(robot).vacuum_entity === H50.vacuum)) {
+      if (status) status.textContent = "O Xiaomi H50 já está configurado.";
+      this._setRobotBusy(false);
+      return;
+    }
+    const robots = [...existing, h50RobotConfig({ id: id(), name: H50.name, display: "icon", floor_y: 0, smoothing_ms: 1600, stale_after_s: 45, calibration: { points: [], heading_offset: 0 } })];
     try {
       await this._saveConfigPatch({ robots });
       if (!this._config?.robots?.some((robot) => robot.id === robots.at(-1).id)) {
@@ -314,13 +349,13 @@ if (!proto.__ha3dRobotTrackersV1) {
     this._renderRobotsPanel();
   };
   proto._robotFromRow = function (robot, row) {
-    robot = this._config?.robots?.find((item) => item.id === robot.id) || robot;
+    robot = h50RobotConfig(this._config?.robots?.find((item) => item.id === robot.id) || robot);
     const get = (name) => row.querySelector(`[data-field="${name}"]`); const c = { ...(robot.calibration || {}) };
     c.heading_offset = number(get("heading_offset").value);
-    if (get("position_entity").value !== robot.position_entity || get("floor_plane").value !== (robot.floor_plane || "xz")) {
+    if (get("floor_plane").value !== (robot.floor_plane || "xz")) {
       c.points = []; for (const key of ["raw_a", "model_a", "raw_b", "model_b"]) delete c[key];
     }
-    return { ...robot, name: get("name").value.trim() || "Robô", display: get("display").value, vacuum_entity: get("vacuum_entity").value, position_entity: get("position_entity").value, object_name: get("object_name").value.trim(), floor_plane: get("floor_plane").value, floor_y: number(get("floor_y").value), smoothing_ms: clamp(number(get("smoothing_ms").value, 1600), 0, 60000), stale_after_s: clamp(number(get("stale_after_s").value, 45), 5, 3600), calibration: c };
+    return h50RobotConfig({ ...robot, name: get("name").value.trim() || H50.name, display: get("display").value, object_name: get("object_name").value.trim(), floor_plane: get("floor_plane").value, floor_y: number(get("floor_y").value), smoothing_ms: clamp(number(get("smoothing_ms").value, 1600), 0, 60000), stale_after_s: clamp(number(get("stale_after_s").value, 45), 5, 3600), remote_pulse_ms: clamp(number(get("remote_pulse_ms").value, 1600), 500, 4000), remote_settle_ms: clamp(number(get("remote_settle_ms").value, 6000), 1000, 20000), calibration: c });
   };
   proto._wireRobotRow = function (robot) {
     const row = this.shadowRoot.querySelector(`[data-robot-id="${CSS.escape(robot.id)}"]`); if (!row) return; const status = row.querySelector("[data-status]");
@@ -340,6 +375,9 @@ if (!proto.__ha3dRobotTrackersV1) {
     row.querySelectorAll("[data-cal-axis]").forEach((input) => input.addEventListener("input", () => this._moveRobotCalibration(robot.id, input.dataset.calAxis, input.value)));
     row.querySelectorAll("[data-cal-number]").forEach((input) => input.addEventListener("input", () => this._moveRobotCalibration(robot.id, input.dataset.calNumber, input.value)));
     row.querySelector('[data-action="confirm"]').addEventListener("click", () => this._confirmRobotPoint(robot.id, updateStatus));
+    row.querySelector('[data-action="auto-step"]').addEventListener("click", () => this._robotAutoStep(robot.id, updateStatus));
+    row.querySelectorAll("[data-remote-pulse]").forEach((button) => button.addEventListener("click", () => this._robotRemotePulse(robot.id, button.dataset.remotePulse, updateStatus)));
+    row.querySelector('[data-action="remote-stop"]').addEventListener("click", () => this._robotRemoteStop(updateStatus));
     row.querySelector('[data-action="next"]').addEventListener("click", () => this._captureNextRobotPoint(robot.id, updateStatus));
     row.querySelector('[data-action="cancel"]').addEventListener("click", () => { if (!this._robotSaving && this._robotCalibration?.id === robot.id) { this._endRobotCalibration(); updateStatus("Ajuste cancelado. A calibração salva foi mantida."); } });
     for (const action of ["apply", "save"]) row.querySelector(`[data-action="${action}"]`).addEventListener("click", () => this._saveRobotRow(robot.id, updateStatus));
@@ -390,29 +428,110 @@ if (!proto.__ha3dRobotTrackersV1) {
   };
   proto._captureNextRobotPoint = function (robotId, status) {
     const active = this._robotCalibration;
-    if (!active || active.id !== robotId || this._robotSaving) return;
+    if (!active || active.id !== robotId || this._robotSaving || this._robotRemoteBusy) return;
     if (active.current && !active.confirmed) return status("Confirme o ponto atual antes de adicionar outro.");
     if (active.points.length >= 50) return status("Limite de 50 pontos. Edite ou remova uma referência existente.");
     const row = this._calibrationRow();
-    if (row.querySelector('[data-field="position_entity"]').value !== active.draft.position_entity || row.querySelector('[data-field="floor_plane"]').value !== active.draft.floor_plane) return status("O sensor ou plano do piso mudou. Cancele o ajuste e abra a calibração novamente.");
+    if (row.querySelector('[data-field="floor_plane"]').value !== active.draft.floor_plane) return status("O plano do piso mudou. Cancele o ajuste e abra a calibração novamente.");
     const raw = getPosition(this._hass, active.draft.position_entity);
     if (!raw) return status("O sensor não fornece X/Y agora. Os pontos anteriores continuam disponíveis para edição.");
     if (active.points.some((p) => Math.hypot(p.raw[0] - raw.x, p.raw[1] - raw.y) < 0.00001)) return status("O sensor ainda mostra a mesma posição de um ponto existente. Mova o robô físico e espere X/Y mudar antes de adicionar outro ponto.");
     const position = previewPosition(raw, { ...active.draft.calibration, points: active.points });
-    active.index = active.points.length; active.current = { raw: [raw.x, raw.y], model: [position.x, position.z] }; active.confirmed = false; active.dirty = false;
+    active.index = active.points.length; active.current = { raw: [raw.x, raw.y], model: [position.x, position.z], heading: raw.heading }; active.confirmed = false; active.dirty = false;
     this._showRobotPoint();
     status(`Ponto ${pointName(active.index)}: leitura capturada. Corrija a esfera e confirme. O robô deve estar parado nesse local.`);
   };
+  proto._callRobotService = function (domain, service, entity_id, data = {}) {
+    if (!this._hass?.callService) throw new Error("Controle de serviço indisponível no Home Assistant.");
+    return this._hass.callService(domain, service, data, { entity_id });
+  };
+  proto._setRemoteButtons = function (disabled) {
+    this.shadowRoot?.querySelectorAll("[data-remote-pulse], [data-action='remote-stop'], [data-action='auto-step']").forEach((button) => { button.disabled = disabled; });
+  };
+  proto._robotRemoteStop = async function (status = () => {}) {
+    status("Parando controle remoto…");
+    for (const code of ["2", "4", "6"]) {
+      try { await this._callRobotService("notify", "send_message", H50.remoteControl, { message: code }); } catch (error) { console.warn("HA3D: unable to release H50 remote code", code, error); }
+    }
+    try { await this._callRobotService("button", "press", H50.exitRemote); } catch (error) { console.warn("HA3D: unable to exit H50 remote mode", error); }
+    status("Controle remoto parado.");
+  };
+  proto._robotRemotePulse = async function (robotId, direction, status = () => {}) {
+    if (this._robotSaving || this._robotRemoteBusy) return;
+    const active = this._robotCalibration;
+    if (active && active.id !== robotId) return status("Finalize a calibração aberta antes de controlar outro robô.");
+    const codes = { forward: ["1", "2", "frente"], left: ["3", "4", "esquerda"], right: ["5", "6", "direita"] }[direction];
+    if (!codes) return;
+    const duration = clamp(number(active?.draft?.remote_pulse_ms, 1600), 500, 4000);
+    this._robotRemoteBusy = true; this._setRemoteButtons(true);
+    try {
+      await this._callRobotService("button", "press", H50.enterRemote);
+      status(`Controle remoto: ${codes[2]} por ${(duration / 1000).toFixed(1)}s…`);
+      await this._callRobotService("notify", "send_message", H50.remoteControl, { message: codes[0] });
+      await new Promise((resolve) => setTimeout(resolve, duration));
+    } catch (error) {
+      status(`Controle remoto falhou: ${errorText(error)}`);
+      return;
+    } finally {
+      try { await this._callRobotService("notify", "send_message", H50.remoteControl, { message: codes?.[1] || "2" }); } catch (error) { console.warn("HA3D: unable to release H50 remote pulse", error); }
+      try { await this._callRobotService("button", "press", H50.exitRemote); } catch (error) { console.warn("HA3D: unable to exit H50 remote mode", error); }
+      this._robotRemoteBusy = false; this._setRemoteButtons(false);
+    }
+    const settle = clamp(number(active?.draft?.remote_settle_ms, 6000), 1000, 20000);
+    status(`Movimento concluído. Aguarde ${(settle / 1000).toFixed(1)}s e use "Capturar posição atual" quando o X/Y atualizar.`);
+  };
+  proto._waitForRobotPositionChange = async function (before, timeoutMs = 12000) {
+    const start = performance.now();
+    while (performance.now() - start < timeoutMs) {
+      const current = getPosition(this._hass, H50.position);
+      if (current && (!before || Math.hypot(current.x - before.x, current.y - before.y) > 20 || current.changed !== before.changed)) return current;
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    }
+    return getPosition(this._hass, H50.position);
+  };
+  proto._robotAutoStep = async function (robotId, status) {
+    const active = this._robotCalibration;
+    if (!active || active.id !== robotId || this._robotSaving || this._robotRemoteBusy) return;
+    if (!active.points.length || (active.current && !active.confirmed)) return status("Confirme o ponto atual antes de usar o pulso seguro.");
+    const before = getPosition(this._hass, H50.position);
+    if (!before) return status("O sensor do H50 não está trazendo X/Y agora.");
+    const row = this._calibrationRow(); const button = row?.querySelector('[data-action="auto-step"]');
+    this._robotRemoteBusy = true; if (button) button.disabled = true;
+    status("Pulso seguro: entrando no remoto…");
+    try {
+      await this._callRobotService("button", "press", H50.enterRemote);
+      const duration = clamp(number(active.draft.remote_pulse_ms, 1600), 500, 4000);
+      status(`Pulso seguro: andando por ${(duration / 1000).toFixed(1)}s…`);
+      await this._callRobotService("notify", "send_message", H50.remoteControl, { message: "1" });
+      await new Promise((resolve) => setTimeout(resolve, duration));
+    } catch (error) {
+      status(`Não consegui iniciar o pulso: ${errorText(error)}`);
+      return;
+    } finally {
+      try { await this._callRobotService("notify", "send_message", H50.remoteControl, { message: "2" }); } catch (error) { console.warn("HA3D: unable to release H50 remote forward", error); }
+      try { await this._callRobotService("button", "press", H50.exitRemote); } catch (error) { console.warn("HA3D: unable to exit H50 remote mode", error); }
+    }
+    const settle = clamp(number(active.draft.remote_settle_ms, 6000), 1000, 20000);
+    status(`Pulso concluído. Aguardando ${(settle / 1000).toFixed(1)}s para o sensor publicar a posição real…`);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, settle));
+      const after = await this._waitForRobotPositionChange(before);
+      if (!after || Math.hypot(after.x - before.x, after.y - before.y) <= 20) return status("O robô parou, mas o sensor ainda não mudou o suficiente. Espere atualizar ou use Adicionar ponto manual.");
+      this._robotRemoteBusy = false; if (button) button.disabled = false;
+      this._captureNextRobotPoint(robotId, status);
+      status(`Novo X/Y detectado: ${Math.round(after.x)} / ${Math.round(after.y)}. Corrija a esfera e confirme o ponto ${pointName(active.index)}.`);
+    } finally {
+      this._robotRemoteBusy = false; if (button) button.disabled = false;
+    }
+  };
   proto._showRobotPoint = function () {
     const active = this._robotCalibration; if (!active?.current) return;
-    if (!this._robotCalibrationMarker) {
-      const marker = new THREE.Mesh(new THREE.SphereGeometry(0.16, 20, 12), new THREE.MeshBasicMaterial({ color: 0xffa726, depthTest: false, depthWrite: false, transparent: true, opacity: 0.9 }));
-      marker.renderOrder = 10000; marker.userData.ha3dRobotCalibration = true;
-      this._scene.add(marker); this._robotCalibrationMarker = marker;
-    }
+    if (!this._robotCalibrationMarker) { this._robotCalibrationMarker = makeCalibrationArrow(); this._scene.add(this._robotCalibrationMarker); }
     const marker = this._robotCalibrationMarker;
     marker.name = `HA3D calibration ${pointName(active.index)}`;
     marker.position.copy(floorVector(active.current.model[0], active.current.model[1], number(active.draft.floor_y), active.draft.floor_plane));
+    const heading = Number.isFinite(active.current.heading) ? active.current.heading : 0;
+    marker.rotation.y = mapHeading(heading, { ...active.draft.calibration, points: active.points }) || THREE.MathUtils.degToRad(heading);
     this._selectedObject = marker;
     if (this._transformControls) { this._transformControls.detach(); this._transformControls.enabled = false; this._transformControls.visible = false; }
     this._showRobotCalibrationControls(active.id, marker); this._renderCalibrationPoints();
@@ -479,7 +598,9 @@ if (!proto.__ha3dRobotTrackersV1) {
     const marker = this._robotCalibrationMarker;
     if (this._selectedObject === marker) this._selectedObject = null;
     if (this._transformControls?.object === marker) this._transformControls.detach();
-    marker?.parent?.remove(marker); marker?.geometry?.dispose(); marker?.material?.dispose(); this._robotCalibrationMarker = null;
+    if (marker?.parent) marker.parent.remove(marker);
+    marker?.traverse?.((node) => { node.geometry?.dispose?.(); node.material?.dispose?.(); });
+    this._robotCalibrationMarker = null;
   };
   proto._endRobotCalibration = function () {
     const row = this._calibrationRow(); this._removeCalibrationMarker(); this._robotCalibration = null;

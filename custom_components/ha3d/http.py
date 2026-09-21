@@ -83,7 +83,8 @@ def _is_valid_robot(value: Any) -> bool:
         return False
     allowed = {
         "id", "name", "vacuum_entity", "position_entity", "object_name", "display",
-        "floor_y", "floor_plane", "visible_states", "smoothing_ms", "stale_after_s", "calibration",
+        "floor_y", "floor_plane", "visible_states", "smoothing_ms", "stale_after_s",
+        "remote_pulse_ms", "remote_settle_ms", "calibration",
     }
     if set(value) - allowed or not isinstance(value.get("id"), str) or not value["id"]:
         return False
@@ -97,7 +98,7 @@ def _is_valid_robot(value: Any) -> bool:
         return False
     if value.get("floor_plane", "xz") not in {"xz", "xy", "yz"}:
         return False
-    for key in ("floor_y", "smoothing_ms", "stale_after_s"):
+    for key in ("floor_y", "smoothing_ms", "stale_after_s", "remote_pulse_ms", "remote_settle_ms"):
         if key in value and not _is_number(value[key]):
             return False
     if "visible_states" in value and (

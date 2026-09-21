@@ -37,18 +37,19 @@ app._renderer=new THREE.WebGLRenderer({antialias:true}); app._renderer.setSize(i
 app._controls=new OrbitControls(app._camera,app._renderer.domElement); app._controls.target.set(3,0,3); app._controls.update();
 app._transformControls={detach(){this.object=null},enabled:false,visible:false};
 app._model=new THREE.Mesh(new THREE.BoxGeometry(12,.05,12),new THREE.MeshBasicMaterial({color:0x333b43})); app._model.position.set(3,-.025,3); app._scene.add(app._model); app._scene.add(new THREE.AmbientLight(0xffffff,3));
-window.bump=(x,y,state='paused',age=0)=>{app._hass.states={'sensor.test_vacuum_position':{state:JSON.stringify({x,y,a:0}),attributes:{friendly_name:'Test robot position'},last_updated:new Date(Date.now()-age).toISOString()},'vacuum.test':{state,attributes:{friendly_name:'Test vacuum'}}};app._updateRobots();};
-app._hass={states:{},async callApi(method,url,data){if(method!=='POST'||url!=='ha3d/config')throw Error('Unsupported API');const res=await fetch('/api/ha3d/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});const body=await res.json();if(!res.ok)throw body;return body;}};
+window.bump=(x,y,state='paused',age=0)=>{app._hass.states={'sensor.xiaomi_robot_vacuum_h50_vacuum_position':{state:JSON.stringify({x,y,a:0}),attributes:{friendly_name:'Xiaomi H50 position'},last_updated:new Date(Date.now()-age).toISOString()},'vacuum.xiaomi_us_1213069013_ov43gb':{state,attributes:{friendly_name:'Xiaomi H50'}}};app._updateRobots();};
+app._hass={states:{},async callApi(method,url,data){if(method!=='POST'||url!=='ha3d/config')throw Error('Unsupported API');const res=await fetch('/api/ha3d/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});const body=await res.json();if(!res.ok)throw body;return body;},async callService(domain,service,data,target){window.serviceIntents.push({domain,service,data,target});}};
 app._config=await (await fetch('/seed')).json(); bump(1000,2000); app._rebuildRobots();
 app.shadowRoot.querySelector('#robotsButton').click(); window.ready=true;
 function frame(){app._updateLightMarkers();app._renderer.render(app._scene,app._camera);requestAnimationFrame(frame)} frame();
 </script></body></html>`;
-const seed = () => ({ robots: [{ id: "r1", name: "Test robot", vacuum_entity: "vacuum.test", position_entity: "sensor.test_vacuum_position", display: "icon", floor_y: 0.25, smoothing_ms: 0, stale_after_s: 45, calibration: {} }] });
+const seed = () => ({ robots: [{ id: "r1", name: "Test robot", vacuum_entity: "vacuum.test", position_entity: "sensor.test_vacuum_position", display: "icon", floor_y: 0.25, smoothing_ms: 0, stale_after_s: 45, remote_pulse_ms: 500, remote_settle_ms: 1000, calibration: {} }] });
 let store = seed(); let failNext = false; let delayNext = false; let releaseSave; const intents = []; const blocked = []; const errors = []; const records = [];
 const browser = await chromium.launch({ headless: true, ...(process.platform === "win32" ? { channel: "msedge" } : {}) });
 const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, serviceWorkers: "block" });
 await context.addInitScript(() => {
   window.blockedTransports=[];
+  window.serviceIntents=[];
   for(const key of ['WebSocket','EventSource','Worker','SharedWorker']) window[key]=class{constructor(){window.blockedTransports.push(key);throw Error('Blocked transport '+key)}};
   navigator.sendBeacon=()=>{window.blockedTransports.push('beacon');return false};
 });
@@ -128,7 +129,7 @@ try {
       await page.evaluate(()=>bump(2000,3000));await click('position');await number('x',7);await number('z',5);await click('confirm');await click('apply');await page.waitForFunction(()=>!app._robotCalibration);assert.equal(store.robots[0].calibration.points.length,4);
     });
     await check("edit_offline_cancel_preserves_store",async()=>{
-      const before=JSON.stringify(store);await page.evaluate(()=>{app._hass.states['sensor.test_vacuum_position'].state='unavailable'});await click('position');await page.locator('[data-edit-point="0"]').click();await number('x',5.8);await click('confirm');await click('cancel');assert.equal(JSON.stringify(store),before);assert.equal(await page.evaluate(()=>app._robotCalibrationMarker===null&&app._robotCalibrationGrid===null),true);
+      const before=JSON.stringify(store);await page.evaluate(()=>{app._hass.states['sensor.xiaomi_robot_vacuum_h50_vacuum_position'].state='unavailable'});await click('position');await page.locator('[data-edit-point="0"]').click();await number('x',5.8);await click('confirm');await click('cancel');assert.equal(JSON.stringify(store),before);assert.equal(await page.evaluate(()=>app._robotCalibrationMarker===null&&app._robotCalibrationGrid===null),true);
     });
     await check("failed_save_retains_draft_then_retry",async()=>{
       await click('position');await page.locator('[data-edit-point="0"]').click();await number('x',6.1);failNext=true;const before=JSON.stringify(store);await click('save');
@@ -150,6 +151,20 @@ try {
       const marker=await page.evaluate(()=>app._robotCalibrationMarker.position.x);assert.notEqual(marker,7.5);
       const rect=await page.locator('#ha3dRobots').boundingBox();assert.ok(rect.x>=0&&rect.x+rect.width<=390);
       await page.screenshot({path:path.join(output,'phone.png')});await click('cancel');
+    });
+    await check("h50_remote_control_pulse_releases_and_exits",async()=>{
+      await page.evaluate(()=>{window.serviceIntents.length=0;bump(2500,3500)});
+      await click('position');await click('confirm');
+      await page.locator('[data-remote-pulse="forward"]').click();
+      await page.waitForFunction(()=>!app._robotRemoteBusy);
+      const calls=await page.evaluate(()=>window.serviceIntents.map((item)=>[item.domain,item.service,item.data?.message,item.target?.entity_id]));
+      assert.deepEqual(calls,[
+        ["button","press",undefined,"button.xiaomi_us_1213069013_ov43gb_enter_remote_a_2_28"],
+        ["notify","send_message","1","notify.xiaomi_us_1213069013_ov43gb_remote_control_a_2_26"],
+        ["notify","send_message","2","notify.xiaomi_us_1213069013_ov43gb_remote_control_a_2_26"],
+        ["button","press",undefined,"button.xiaomi_us_1213069013_ov43gb_exit_remote_a_2_29"],
+      ]);
+      await click('cancel');
     });
     await check("alternate_floor_plane_fixed_height",async()=>{
       await page.locator('[data-robot-settings] summary').click();await page.locator('[data-field="floor_plane"]').selectOption('xy');await click('position');const s=await page.evaluate(()=>({p:app._robotCalibrationMarker.position.toArray(),z:app._robotCalibrationGrid.position.z}));near(s.p[2],.25);near(s.z,.25);assert.equal(await page.locator('[data-cal-number="z"]').isDisabled(),true);await click('cancel');

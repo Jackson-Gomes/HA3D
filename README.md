@@ -114,24 +114,30 @@ renderer Three.js/GLB e acrescenta, para administradores:
 ## Robôs no cenário 3D
 
 A versão de teste inclui um menu **Robôs** independente dos bindings comuns.
-Cada robô combina uma entidade `vacuum.*` (estado) com uma entidade de posição
-que exponha `x`, `y` e `a`/`heading` — como os sensores do Xiaomi Cloud Map
-Extractor. Também aceita esses valores como JSON no estado ou dentro de
-`vacuum_position`/`position`.
+Por enquanto o fluxo é fechado para o **Xiaomi Robot Vacuum H50** do usuário:
+`vacuum.xiaomi_us_1213069013_ov43gb` e
+`sensor.xiaomi_robot_vacuum_h50_vacuum_position`. A seleção manual de sensor foi
+removida para evitar escolher os sensores errados da integração Xiaomi.
 
-1. Abra **Robôs → Adicionar robô** e escolha as duas entidades.
+1. Abra **Robôs → Adicionar Xiaomi H50**.
 2. Escolha o ícone 3D padrão ou, no **Editor**, selecione um objeto do GLB e use
    **Usar objeto selecionado**.
-3. Em **Entidades, plano e altura do piso**, escolha o plano (normalmente **XZ**)
+3. Em **Xiaomi H50, plano e altura do piso**, escolha o plano (normalmente **XZ**)
    e ajuste a **Altura fixa do piso**. Ela vale para todos os pontos e não varia
    com o sensor. Durante a calibração, a grade ajuda a conferir essa altura.
-4. Com o robô físico parado, clique em **Calibrar posição**. A esfera começa na
-   posição estimada do sensor; corrija-a pelos controles dos dois eixos do piso
+4. Ajuste **Pulso remoto (ms)** e **Espera do sensor (ms)** se necessário. O
+   pulso é limitado e sempre envia o comando de soltar/sair do controle remoto.
+5. Com o robô físico parado, clique em **Calibrar posição**. O marcador com seta
+   começa na posição estimada do sensor; corrija-o pelos controles dos dois eixos
+   do piso
    e clique em **Confirmar ponto A**. Antes das primeiras referências, usa-se
    uma estimativa inicial de 0,001 unidade 3D por unidade do sensor.
-5. Mova o robô físico para outro lugar, espere o X/Y atualizar e clique em
-   **Adicionar ponto B**. Corrija e confirme; repita com **C**, fora da linha A–B.
-6. Adicione mais referências se desejar e clique em **Salvar calibração**.
+6. Use **Frente**, **Girar esquerda**, **Girar direita** ou mova o robô
+   manualmente. Espere o X/Y atualizar e clique em **Capturar posição atual**.
+   Corrija e confirme; repita com **C**, fora da linha A–B. O botão
+   **Pulso e capturar próximo ponto** faz um passo assistido: move, solta,
+   aguarda o atraso configurado e tenta capturar a nova posição.
+7. Adicione mais referências se desejar e clique em **Salvar calibração**.
    Confirmar pontos prepara o ajuste; só o salvamento final grava no HA.
 
 O ajuste usa todos os pontos para calcular uma transformação afim por mínimos
@@ -156,10 +162,12 @@ precisar ser removidas/substituídas.
 Calibrações antigas A/B continuam legíveis. Ao editá-las no novo fluxo, adicione
 um terceiro ponto para o ajuste automático completo. Leituras antigas mantêm a
 última posição com ícone esmaecido e aviso; estados sem X/Y ou indisponíveis
-ocultam o robô e informam o motivo. Não são enviadas ações físicas ao aspirador.
+ocultam o robô e informam o motivo. Os comandos remotos usam as ações do próprio
+H50: entrar no remoto, botão de direção, soltar e sair do remoto.
 
-**Atualização para v0.2.8:** atualize pelo HACS, reinicie o Home Assistant para
-carregar o novo formato de pontos no backend e recarregue o painel HA3D.
+**Atualização para v0.2.9:** atualize pelo HACS, reinicie o Home Assistant para
+carregar os novos campos de controle remoto no backend e recarregue o painel
+HA3D.
 
 ### Verificação da calibração
 
