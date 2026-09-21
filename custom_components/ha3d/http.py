@@ -83,7 +83,7 @@ def _is_valid_robot(value: Any) -> bool:
         return False
     allowed = {
         "id", "name", "vacuum_entity", "position_entity", "object_name", "display",
-        "floor_y", "visible_states", "smoothing_ms", "stale_after_s", "calibration",
+        "floor_y", "floor_plane", "visible_states", "smoothing_ms", "stale_after_s", "calibration",
     }
     if set(value) - allowed or not isinstance(value.get("id"), str) or not value["id"]:
         return False
@@ -94,6 +94,8 @@ def _is_valid_robot(value: Any) -> bool:
     if "object_name" in value and (not isinstance(value["object_name"], str) or len(value["object_name"]) > 255):
         return False
     if value.get("display", "icon") not in {"icon", "object"}:
+        return False
+    if value.get("floor_plane", "xz") not in {"xz", "xy", "yz"}:
         return False
     for key in ("floor_y", "smoothing_ms", "stale_after_s"):
         if key in value and not _is_number(value[key]):
@@ -107,9 +109,19 @@ def _is_valid_robot(value: Any) -> bool:
     calibration = value.get("calibration", {})
     if not isinstance(calibration, dict):
         return False
-    calibration_allowed = {"raw_a", "model_a", "raw_b", "model_b", "swap_xy", "invert_x", "invert_y", "heading_offset"}
+    calibration_allowed = {"points", "raw_a", "model_a", "raw_b", "model_b", "swap_xy", "invert_x", "invert_y", "heading_offset"}
     if set(calibration) - calibration_allowed:
         return False
+    if "points" in calibration:
+        points = calibration["points"]
+        if not isinstance(points, list) or len(points) > 50:
+            return False
+        for point in points:
+            if not isinstance(point, dict) or set(point) != {"raw", "model"}:
+                return False
+            for key in ("raw", "model"):
+                if not isinstance(point[key], list) or len(point[key]) != 2 or not all(_is_number(number) for number in point[key]):
+                    return False
     for key in ("raw_a", "model_a", "raw_b", "model_b"):
         if key in calibration and (not isinstance(calibration[key], list) or len(calibration[key]) != 2 or not all(_is_number(number) for number in calibration[key])):
             return False

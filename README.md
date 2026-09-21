@@ -122,14 +122,54 @@ Extractor. Também aceita esses valores como JSON no estado ou dentro de
 1. Abra **Robôs → Adicionar robô** e escolha as duas entidades.
 2. Escolha o ícone 3D padrão ou, no **Editor**, selecione um objeto do GLB e use
    **Usar objeto selecionado**.
-3. Com o robô parado num local conhecido, clique em **Capturar A**, arraste a
-   esfera laranja pelo cenário usando a tríade do Editor e clique em **Salvar A**.
-4. Repita num segundo local, distante do primeiro, com o ponto B roxo.
+3. Em **Entidades, plano e altura do piso**, escolha o plano (normalmente **XZ**)
+   e ajuste a **Altura fixa do piso**. Ela vale para todos os pontos e não varia
+   com o sensor. Durante a calibração, a grade ajuda a conferir essa altura.
+4. Com o robô físico parado, clique em **Calibrar posição**. A esfera começa na
+   posição estimada do sensor; corrija-a pelos controles dos dois eixos do piso
+   e clique em **Confirmar ponto A**. Antes das primeiras referências, usa-se
+   uma estimativa inicial de 0,001 unidade 3D por unidade do sensor.
+5. Mova o robô físico para outro lugar, espere o X/Y atualizar e clique em
+   **Adicionar ponto B**. Corrija e confirme; repita com **C**, fora da linha A–B.
+6. Adicione mais referências se desejar e clique em **Salvar calibração**.
+   Confirmar pontos prepara o ajuste; só o salvamento final grava no HA.
 
-O HA3D calcula escala, rotação e deslocamento. Há ajustes para trocar/inverter
-eixos, altura, direção do modelo, suavização e tempo máximo para uma posição.
-Quando a posição fica antiga ou indisponível, o robô é ocultado em vez de ser
-movido para uma posição inventada.
+O ajuste usa todos os pontos para calcular uma transformação afim por mínimos
+quadrados: escala, rotação, deslocamento e inversão dos eixos são automáticos.
+São necessários pelo menos três pontos não alinhados; até 50 referências são
+aceitas. X/Y do sensor sempre são projetados no plano escolhido (XZ, XY ou YZ),
+sem modificar a altura fixa. A grade pode ser ocultada no checkbox.
+
+Use **Editar calibração / posição** para corrigir uma referência existente sem
+recapturar o sensor, remover um ponto incorreto ou acrescentar novos pontos em
+outros dias. Todos os pontos anteriores ficam salvos. Mais pontos não garantem
+melhor precisão se estiverem incorretos: o erro médio mostrado é o residual do
+ajuste em unidades do modelo, não uma medida de precisão física.
+
+Uma falha ao salvar preserva o ajuste na tela para nova tentativa. **Cancelar
+ajuste** mantém a calibração persistida. Fechar e reabrir o menu mantém o ajuste
+em andamento, mas recarregar a página descarta pontos ainda não salvos.
+Ao mudar de sensor ou plano, é necessário calibrar novamente. Se o robô recriar
+o mapa e mudar seu sistema de coordenadas, as referências antigas também podem
+precisar ser removidas/substituídas.
+
+Calibrações antigas A/B continuam legíveis. Ao editá-las no novo fluxo, adicione
+um terceiro ponto para o ajuste automático completo. Leituras antigas mantêm a
+última posição com ícone esmaecido e aviso; estados sem X/Y ou indisponíveis
+ocultam o robô e informam o motivo. Não são enviadas ações físicas ao aspirador.
+
+**Atualização para v0.2.8:** atualize pelo HACS, reinicie o Home Assistant para
+carregar o novo formato de pontos no backend e recarregue o painel HA3D.
+
+### Verificação da calibração
+
+`npm test` verifica a matemática e os planos; `python -m unittest discover -s
+tests -p 'test_*.py'` verifica o validador do backend. `npm install` seguido de
+`npm run test:browser` executa o módulo real de robôs com Three.js em um navegador
+isolado e backend simulado (Edge no Windows; Playwright Chromium nos demais
+sistemas). O teste não usa a instalação nem os dispositivos reais do usuário.
+O renderer principal completo e aparelhos iOS reais não são cobertos por essa
+simulação. Resultados e capturas ficam em `test-results/`.
 
 Os conceitos de UX foram inspirados pelo Easy Floorplan, sob MIT. Veja `NOTICE`.
 Não há renderer SVG, código ou assets do projeto incorporados ao HA3D.
