@@ -103,7 +103,12 @@ function applyMarkerFilter(panel) {
   const states = panel._hass?.states || {};
   for (const [entity, binding] of panel._lightBindings?.entries?.() || []) {
     if (!binding?.marker) continue;
-    binding.marker.style.display = shouldShowEntity(entity, states[entity], mode) ? "" : "none";
+    const visible = shouldShowEntity(entity, states[entity], mode);
+
+    // Visibility belongs exclusively to the filter. Other late-loaded modules
+    // may style marker display for icon layout, so use a dedicated class with
+    // !important instead of competing over marker.style.display.
+    binding.marker.classList.toggle("ha3d-filter-hidden", !visible);
   }
 
   syncFilterButtons(panel);
@@ -120,7 +125,7 @@ function installFilterBar(panel) {
   if (!root) return false;
 
   let bar = panel.shadowRoot.querySelector("#markerFilterBar");
-  if (bar?.dataset?.ha3dFilterVersion === "4") {
+  if (bar?.dataset?.ha3dFilterVersion === "5") {
     applyMarkerFilter(panel);
     return true;
   }
@@ -129,10 +134,11 @@ function installFilterBar(panel) {
   // earlier filtering rules to the current buttons.
   bar?.remove();
 
-  if (!panel.shadowRoot.querySelector("#ha3dMarkerFilterStyleV3")) {
+  if (!panel.shadowRoot.querySelector("#ha3dMarkerFilterStyleV5")) {
     const style = document.createElement("style");
-    style.id = "ha3dMarkerFilterStyleV3";
+    style.id = "ha3dMarkerFilterStyleV5";
     style.textContent = `
+      .lightMarker.ha3d-filter-hidden{display:none!important}
       #markerFilterBar{
         position:absolute;
         left:50%;
@@ -191,7 +197,7 @@ function installFilterBar(panel) {
   bar = document.createElement("div");
   bar.id = "markerFilterBar";
   bar.className = "glass";
-  bar.dataset.ha3dFilterVersion = "4";
+  bar.dataset.ha3dFilterVersion = "5";
   bar.setAttribute("role", "toolbar");
   bar.setAttribute("aria-label", "Filtros de marcadores");
   bar.innerHTML = `
@@ -238,8 +244,8 @@ function installOnExistingPanels() {
   }
 }
 
-if (!proto.__ha3dMarkerFilterBarV4) {
-  proto.__ha3dMarkerFilterBarV4 = true;
+if (!proto.__ha3dMarkerFilterBarV5) {
+  proto.__ha3dMarkerFilterBarV5 = true;
 
   const originalConnectedCallback = proto.connectedCallback;
   proto.connectedCallback = function () {
