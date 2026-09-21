@@ -110,7 +110,9 @@ if (!proto.__ha3dEasyFloorplanTestV1) {
   };
 
   proto._saveConfigPatch = async function (patch) {
-    this._config = await this._hass.callApi("POST", "ha3d/config", patch);
+    // Home Assistant's callApi accepts query parameters as its third argument
+    // and JSON body as its fourth. Editor data must be sent as the latter.
+    this._config = await this._hass.callApi("POST", "ha3d/config", undefined, patch);
   };
   proto._saveEditorBinding = async function (name) {
     const body = this.shadowRoot.querySelector("#ha3dEditorBody");
