@@ -11,6 +11,7 @@ const proto = Panel.prototype;
 const INTERACTIVE_DOMAINS = new Set(["light", "switch", "fan", "input_boolean"]);
 
 function entityDomain(entityId) { return String(entityId || "").split(".", 1)[0]; }
+function escapeHtml(value) { return String(value ?? "").replace(/[&<>'"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char]); }
 function isOffline(state) { return ["unavailable", "unknown"].includes(state?.state); }
 function stateRule(config, state) {
   const value = state?.state;
@@ -97,14 +98,17 @@ if (!proto.__ha3dEasyFloorplanTestV1) {
     if (!this._areaData) {
       try { this._areaData = (await this._hass.callApi("GET", "ha3d/areas")).areas || []; } catch (_error) { this._areaData = []; }
     }
-    const options = [`<option value="">Nenhuma</option>`, ...this._areaData.map((item) => `<option value="${item.id}" ${item.id === area ? "selected" : ""}>${item.name}</option>`)].join("");
-    body.innerHTML = `<div class="ha3dRow"><label>Objeto GLB</label><input disabled value="${name}"></div>
-      <div class="ha3dRow"><label>Entidade principal</label><input id="ha3dEntity" placeholder="light.exemplo" value="${advanced.entity_id || object.userData?.ha3dEntityId || ""}"></div>
+    const options = [`<option value="">Nenhuma</option>`, ...this._areaData.map((item) => `<option value="${escapeHtml(item.id)}" ${item.id === area ? "selected" : ""}>${escapeHtml(item.name)}</option>`)].join("");
+    const selectedEntity = advanced.entity_id || object.userData?.ha3dEntityId || "";
+    body.innerHTML = `<div class="ha3dRow"><label>Objeto GLB</label><input disabled value="${escapeHtml(name)}"></div>
+      <div class="ha3dRow"><label>Entidade principal</label><input id="ha3dEntity" list="ha3dEntityOptions" autocomplete="off" placeholder="Pesquise por nome ou entity_id…" value="${escapeHtml(selectedEntity)}"><datalist id="ha3dEntityOptions"></datalist><span class="ha3dHint">Digite “DeskJet”, “tinta” ou qualquer parte do nome.</span></div>
       <div class="ha3dRow"><label>Área do Home Assistant</label><select id="ha3dArea">${options}</select></div>
       <div class="ha3dRow"><label>Leituras extras (uma por linha: entity_id ou entity_id:atributo)</label><textarea id="ha3dReadings" placeholder="sensor.temperatura_sala\nsensor.umidade_sala">${(advanced.readings || []).map((item) => typeof item === "string" ? item : `${item.entity_id || ""}${item.attribute ? `:${item.attribute}` : ""}`).join("\n")}</textarea></div>
       <div class="ha3dRow"><label>Regras visuais JSON (ex.: [{"state":"on","color":"#ffd54f","icon":"💡"}])</label><textarea id="ha3dRules">${JSON.stringify(advanced.state_rules || [])}</textarea></div>
       <div class="ha3dRow"><label><input id="ha3dZoomOnly" type="checkbox" ${advanced.show_only_when_zoomed ? "checked" : ""}> Exibir somente quando próximo</label></div>
       <div class="ha3dEditorActions"><button id="ha3dSaveObject" type="button">Salvar binding</button><button id="ha3dAddArea" class="secondary" type="button">Adicionar entidades da área</button></div>`;
+    this._updateEntityChoices(area);
+    body.querySelector("#ha3dArea").addEventListener("change", (event) => this._updateEntityChoices(event.target.value));
     body.querySelector("#ha3dSaveObject").addEventListener("click", () => this._saveEditorBinding(name));
     body.querySelector("#ha3dAddArea").addEventListener("click", () => this._addAreaEntities(name));
   };
@@ -113,6 +117,22 @@ if (!proto.__ha3dEasyFloorplanTestV1) {
     // Home Assistant's callApi accepts query parameters as its third argument
     // and JSON body as its fourth. Editor data must be sent as the latter.
     this._config = await this._hass.callApi("POST", "ha3d/config", undefined, patch);
+  };
+
+  proto._updateEntityChoices = function (areaId = "") {
+    const list = this.shadowRoot.querySelector("#ha3dEntityOptions");
+    if (!list) return;
+    const scoped = areaId ? this._areaData?.find((area) => area.id === areaId)?.entities : null;
+    const allowed = scoped ? new Set(scoped) : null;
+    const entities = Object.entries(this._hass?.states || {})
+      .filter(([entityId]) => !allowed || allowed.has(entityId))
+      .sort(([left], [right]) => left.localeCompare(right));
+    list.replaceChildren(...entities.map(([entityId, state]) => {
+      const option = document.createElement("option");
+      option.value = entityId;
+      option.label = `${state.attributes?.friendly_name || entityId} — ${entityId}`;
+      return option;
+    }));
   };
   proto._saveEditorBinding = async function (name) {
     const body = this.shadowRoot.querySelector("#ha3dEditorBody");
