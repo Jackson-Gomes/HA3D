@@ -162,7 +162,10 @@ if (!proto.__ha3dEasyFloorplanTestV1) {
       const anchorName = config.anchor || key;
       this._model?.traverse((object) => { if (!anchor && (object.name === anchorName || object.userData?.ha3dOriginalNodeName === anchorName)) anchor = object; });
       if (!anchor) continue;
-      this._makeLightMarker(entity, this._hass?.states?.[entity]?.attributes?.friendly_name || entity, anchor, null);
+      const binding = this._makeLightMarker(entity, this._hass?.states?.[entity]?.attributes?.friendly_name || entity, anchor, null);
+      // GLB node origins are often at a parent pivot, not inside the mesh. Use
+      // its visual bounds for editor-created markers so they land on the item.
+      binding.ha3dAnchorBounds = true;
     }
   };
 
@@ -189,6 +192,18 @@ if (!proto.__ha3dEasyFloorplanTestV1) {
       if (config?.show_only_when_zoomed) {
         const distance = this._camera.position.distanceTo(this._controls.target);
         binding.marker.style.display = distance < (this._modelScale || 10) * 1.15 ? "block" : "none";
+      }
+      if (binding.ha3dAnchorBounds) {
+        const box = new THREE.Box3().setFromObject(binding.anchor);
+        if (box.isEmpty()) continue;
+        const point = box.getCenter(new THREE.Vector3()).project(this._camera);
+        const stage = this.shadowRoot.querySelector("#stage");
+        const visible = point.z > -1 && point.z < 1 && Math.abs(point.x) <= 1.15 && Math.abs(point.y) <= 1.15;
+        binding.marker.style.visibility = visible ? "visible" : "hidden";
+        if (visible) {
+          binding.marker.style.left = `${(point.x * 0.5 + 0.5) * stage.clientWidth}px`;
+          binding.marker.style.top = `${(-point.y * 0.5 + 0.5) * stage.clientHeight}px`;
+        }
       }
     }
   };
