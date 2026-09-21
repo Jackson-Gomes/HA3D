@@ -1,7 +1,7 @@
 /*
- * Xiaomi Map Extractor overlay for HA3D robot tracking.
- * Test layer: keeps the existing robot calibration path intact and stores the
- * overlay transform locally in the browser while the feature is validated.
+ * Xiaomi Map Extractor driven positioning for HA3D robot tracking.
+ * The Xiaomi map is the calibration reference: align the map with the GLB and
+ * the icon / selected GLB geometry immediately follows the vacuum position.
  */
 const Panel = customElements.get("ha3d-panel");
 if (!Panel) throw new Error("HA3D panel was not registered");
@@ -11,9 +11,10 @@ const proto = Panel.prototype;
 
 const MAP_ENTITY = "image.xiaomi_robot_vacuum_h50_live_map";
 const STORAGE_KEY = "ha3d_xiaomi_map_overlay_v1";
-const DEFAULTS = Object.freeze({ visible: false, x: 0, z: 0, y: 0.02, scale: 0.025, rotation: 0, opacity: 0.55 });
+const DEFAULTS = Object.freeze({ visible: true, x: 0, z: 0, y: 0.02, scale: 0.025, rotation: 0, opacity: 0.55 });
 const num = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+const offline = (state) => !state || ["unknown", "unavailable"].includes(state.state);
 
 function readAll() {
   try {
@@ -33,7 +34,9 @@ function saveSettings(robotId, value) {
   const all = readAll();
   all[robotId] = {
     visible: Boolean(value.visible),
-    x: num(value.x), z: num(value.z), y: num(value.y, DEFAULTS.y),
+    x: num(value.x),
+    z: num(value.z),
+    y: num(value.y, DEFAULTS.y),
     scale: clamp(num(value.scale, DEFAULTS.scale), 0.0001, 10),
     rotation: num(value.rotation),
     opacity: clamp(num(value.opacity, DEFAULTS.opacity), 0, 1),
@@ -44,16 +47,23 @@ function saveSettings(robotId, value) {
 
 function getPosition(hass, entityId) {
   const state = hass?.states?.[entityId];
-  if (!state || ["unknown", "unavailable"].includes(state.state)) return null;
+  if (offline(state)) return null;
   let source = state.attributes || {};
   if (![source.x, source.y, source.a].some((value) => value !== undefined)) {
     try { source = { ...source, ...JSON.parse(state.state) }; } catch (_error) { /* normal */ }
   }
   const embedded = source.vacuum_position || source.position;
   if (embedded && typeof embedded === "object") source = { ...source, ...embedded };
-  const x = Number(source.x); const y = Number(source.y);
+  const x = Number(source.x);
+  const y = Number(source.y);
+  const heading = Number(source.a ?? source.heading ?? source.angle);
   if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
-  return { x, y };
+  return {
+    x,
+    y,
+    heading: Number.isFinite(heading) ? heading : 0,
+    changed: state.last_updated || state.last_changed,
+  };
 }
 
 function mapCalibration(hass) {
@@ -61,8 +71,10 @@ function mapCalibration(hass) {
   const points = state?.attributes?.calibration_points;
   if (!Array.isArray(points) || points.length < 3) return null;
   const p = points.slice(0, 3).map((point) => ({
-    x: Number(point?.vacuum?.x), y: Number(point?.vacuum?.y),
-    u: Number(point?.map?.x), v: Number(point?.map?.y),
+    x: Number(point?.vacuum?.x),
+    y: Number(point?.vacuum?.y),
+    u: Number(point?.map?.x),
+    v: Number(point?.map?.y),
   }));
   if (p.some((item) => ![item.x, item.y, item.u, item.v].every(Number.isFinite))) return null;
 
@@ -94,8 +106,12 @@ function pixelToFloor(position, calibration, settings, imageSize) {
   const u = (px - imageSize.width / 2) * scale;
   const v = (py - imageSize.height / 2) * scale;
   const r = THREE.MathUtils.degToRad(num(settings.rotation));
-  const cos = Math.cos(r); const sin = Math.sin(r);
-  return { x: num(settings.x) + u * cos - v * sin, z: num(settings.z) + u * sin + v * cos };
+  const cos = Math.cos(r);
+  const sin = Math.sin(r);
+  return {
+    x: num(settings.x) + u * cos - v * sin,
+    z: num(settings.z) + u * sin + v * cos,
+  };
 }
 
 function disposeMap(entry) {
@@ -108,6 +124,7 @@ function disposeMap(entry) {
   entry.ha3dMapOverlay = null;
   entry.ha3dMapUrl = null;
   entry.ha3dMapSize = null;
+  entry.ha3dMapLoading = false;
 }
 
 function applyPlane(mesh, settings, size, plane = "xz") {
@@ -116,9 +133,15 @@ function applyPlane(mesh, settings, size, plane = "xz") {
   mesh.position.copy(floorVector(num(settings.x), num(settings.z), num(settings.y, DEFAULTS.y), plane));
   mesh.rotation.set(0, 0, 0);
   const angle = THREE.MathUtils.degToRad(num(settings.rotation));
-  if (plane === "xz") { mesh.rotation.x = -Math.PI / 2; mesh.rotation.z = angle; }
-  else if (plane === "xy") mesh.rotation.z = angle;
-  else { mesh.rotation.y = Math.PI / 2; mesh.rotation.z = angle; }
+  if (plane === "xz") {
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.rotation.z = angle;
+  } else if (plane === "xy") {
+    mesh.rotation.z = angle;
+  } else {
+    mesh.rotation.y = Math.PI / 2;
+    mesh.rotation.z = angle;
+  }
   mesh.material.opacity = clamp(num(settings.opacity, DEFAULTS.opacity), 0, 1);
   mesh.visible = Boolean(settings.visible);
 }
@@ -129,34 +152,44 @@ function statusText(panel, entry) {
   if (!mapState.attributes?.entity_picture) return "Mapa encontrado, mas sem entity_picture.";
   if (!mapCalibration(panel._hass)) return "Mapa encontrado, mas calibration_points não estão disponíveis.";
   if (!entry?.ha3dMapSize) return "Carregando imagem do mapa…";
-  return `Mapa pronto · ${entry.ha3dMapSize.width}×${entry.ha3dMapSize.height}px · ajuste até coincidir com o piso.`;
+  return `Mapa pronto · ${entry.ha3dMapSize.width}×${entry.ha3dMapSize.height}px · alinhe o mapa com o GLB; o robô segue automaticamente.`;
 }
 
 function ensureMap(panel, entry) {
-  if (!entry) return;
-  const settings = settingsFor(entry.config.id);
+  if (!entry || !panel._scene) return;
   const state = panel._hass?.states?.[MAP_ENTITY];
   const picture = state?.attributes?.entity_picture;
-  if (!settings.visible || !picture || !panel._scene) {
+  if (!picture) {
     if (entry.ha3dMapOverlay) entry.ha3dMapOverlay.visible = false;
     return;
   }
 
+  const settings = settingsFor(entry.config.id);
   if (entry.ha3dMapOverlay && entry.ha3dMapUrl === picture) {
     applyPlane(entry.ha3dMapOverlay, settings, entry.ha3dMapSize || { width: 1, height: 1 }, entry.config.floor_plane || "xz");
     return;
   }
+  if (entry.ha3dMapLoading && entry.ha3dMapUrl === picture) return;
 
   disposeMap(entry);
   entry.ha3dMapUrl = picture;
+  entry.ha3dMapLoading = true;
   const loader = new THREE.TextureLoader();
   loader.load(picture, (texture) => {
+    entry.ha3dMapLoading = false;
     texture.colorSpace = THREE.SRGBColorSpace;
     const image = texture.image || {};
-    entry.ha3dMapSize = { width: image.naturalWidth || image.width || 1, height: image.naturalHeight || image.height || 1 };
+    entry.ha3dMapSize = {
+      width: image.naturalWidth || image.width || 1,
+      height: image.naturalHeight || image.height || 1,
+    };
     const material = new THREE.MeshBasicMaterial({
-      map: texture, transparent: true, opacity: settings.opacity,
-      depthWrite: false, side: THREE.DoubleSide, toneMapped: false,
+      map: texture,
+      transparent: true,
+      opacity: settings.opacity,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      toneMapped: false,
     });
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material);
     mesh.name = "HA3D_Xiaomi_H50_Map_Overlay";
@@ -169,6 +202,7 @@ function ensureMap(panel, entry) {
     updateRobotFromMap(panel, entry, true);
     refreshStatus(panel, entry.config.id);
   }, undefined, (error) => {
+    entry.ha3dMapLoading = false;
     console.warn("HA3D: unable to load Xiaomi map overlay", error);
     refreshStatus(panel, entry.config.id, "Falha ao carregar a imagem do mapa.");
   });
@@ -177,28 +211,60 @@ function ensureMap(panel, entry) {
 function updateRobotFromMap(panel, entry, snap = false) {
   if (!entry) return;
   const settings = settingsFor(entry.config.id);
-  if (!settings.visible || !entry.ha3dMapSize) return;
   const calibration = mapCalibration(panel._hass);
   const position = getPosition(panel._hass, entry.config.position_entity);
   const mapped = pixelToFloor(position, calibration, settings, entry.ha3dMapSize);
   const root = entry.object || entry.icon;
-  if (!root || !mapped) return;
+  if (!root) return;
 
   const vacuum = panel._hass?.states?.[entry.config.vacuum_entity];
   const visibleStates = entry.config.visible_states || ["cleaning", "returning", "docked", "paused", "idle"];
-  const available = vacuum && !["unknown", "unavailable"].includes(vacuum.state) && visibleStates.includes(vacuum.state);
-  root.visible = Boolean(available);
-  if (!available) return;
+  const available = !offline(vacuum) && Boolean(position) && visibleStates.includes(vacuum.state);
+  root.visible = Boolean(available && mapped);
+
+  const live = panel.shadowRoot?.querySelector(`[data-robot-id="${CSS.escape(entry.config.id)}"] [data-live]`);
+  if (!mapped) {
+    if (live) {
+      const reason = !position
+        ? "Aguardando posição X/Y do Xiaomi."
+        : !calibration
+          ? "Aguardando calibration_points do Map Extractor."
+          : !entry.ha3dMapSize
+            ? "Carregando o mapa Xiaomi."
+            : "Não foi possível converter a posição do robô.";
+      live.textContent = reason;
+    }
+    return;
+  }
+
+  if (!available) {
+    if (live) live.textContent = offline(vacuum) ? "Robô indisponível no Home Assistant." : `Robô oculto no estado: ${vacuum?.state || "desconhecido"}.`;
+    return;
+  }
 
   const target = floorVector(mapped.x, mapped.z, num(entry.config.floor_y), entry.config.floor_plane || "xz");
   entry.target?.copy?.(target);
   if (entry.icon) {
-    if (snap || !entry.icon.position.lengthSq()) entry.icon.position.copy(target);
+    if (snap || !entry.ha3dMapPlaced) entry.icon.position.copy(target);
     else entry.icon.position.lerp(target, 0.22);
   } else if (entry.object) {
     const local = entry.object.parent ? entry.object.parent.worldToLocal(target.clone()) : target;
-    if (snap) entry.object.position.copy(local); else entry.object.position.lerp(local, 0.22);
+    if (snap || !entry.ha3dMapPlaced) entry.object.position.copy(local);
+    else entry.object.position.lerp(local, 0.22);
   }
+  entry.ha3dMapPlaced = true;
+
+  const timestamp = Date.parse(position.changed);
+  const stale = Number.isFinite(timestamp) && Date.now() - timestamp > num(entry.config.stale_after_s, 45) * 1000;
+  if (entry.icon) {
+    entry.icon.traverse((node) => {
+      if (node.material) {
+        node.material.transparent = true;
+        node.material.opacity = stale ? 0.45 : 1;
+      }
+    });
+  }
+  if (live) live.textContent = `${stale ? "Última posição conhecida" : "Posição pelo mapa"} · X ${position.x} · Y ${position.y}`;
 }
 
 function refreshStatus(panel, robotId, forced = "") {
@@ -222,6 +288,41 @@ function control(label, key, value, min, max, step) {
   return `<label class="ha3dMapControl"><span>${label}</span><input type="range" data-map-range="${key}" min="${min}" max="${max}" step="${step}" value="${value}"><input type="number" data-map-value="${key}" min="${min}" max="${max}" step="${step}" value="${value}"></label>`;
 }
 
+function hideLegacyCalibration(row) {
+  row.querySelector('[data-action="position"]')?.remove();
+  row.querySelector('[data-saved-points]')?.remove();
+  row.querySelector('[data-calibration]')?.remove();
+  for (const field of ["remote_pulse_ms", "remote_settle_ms", "heading_offset"]) {
+    const input = row.querySelector(`[data-field="${field}"]`);
+    if (input?.closest("label")) input.closest("label").style.display = "none";
+  }
+}
+
+async function useSelectedGeometry(panel, robotId, row, status) {
+  const selected = panel._selectedObject;
+  if (!selected || selected.userData?.ha3dRobotMapOverlay || selected.userData?.ha3dRobotIcon || selected.userData?.ha3dRobotCalibration) {
+    status("Selecione a geometria do robô no GLB primeiro.");
+    return;
+  }
+  const objectName = selected.userData?.ha3dOriginalNodeName || selected.name;
+  if (!objectName) {
+    status("A geometria selecionada não possui nome utilizável.");
+    return;
+  }
+  row.querySelector('[data-field="object_name"]').value = objectName;
+  row.querySelector('[data-field="display"]').value = "object";
+  status("Vinculando geometria ao robô…");
+  await panel._saveRobotRow?.(robotId, status);
+  panel._updateRobots?.(true);
+}
+
+async function useDefaultIcon(panel, robotId, row, status) {
+  row.querySelector('[data-field="display"]').value = "icon";
+  status("Ativando ícone 3D…");
+  await panel._saveRobotRow?.(robotId, status);
+  panel._updateRobots?.(true);
+}
+
 function installUi(panel) {
   if (!panel.shadowRoot) return;
   if (!panel.shadowRoot.querySelector("#ha3dMapOverlayStyle")) {
@@ -235,69 +336,105 @@ function installUi(panel) {
       .ha3dMapControl input[type=range]{width:100%;margin:0;padding:0}
       .ha3dMapControl input[type=number]{width:76px!important;margin:0!important;padding:5px!important}
       .ha3dMapStatus{font-size:10px;opacity:.72;line-height:1.3;margin-top:7px}
-      .ha3dMapActions{display:flex;gap:7px;margin-top:8px}.ha3dMapActions button{padding:6px 8px;font-size:11px}
+      .ha3dMapActions{display:flex;gap:7px;flex-wrap:wrap;margin-top:8px}.ha3dMapActions button{padding:6px 8px;font-size:11px}
     `;
     panel.shadowRoot.appendChild(style);
   }
 
+  const robotsPanel = panel.shadowRoot.querySelector("#ha3dRobots");
+  const intro = robotsPanel?.querySelector(".ha3dRobotHint");
+  if (intro) intro.textContent = "O mapa Xiaomi é a referência. Alinhe o mapa com a planta 3D e escolha entre o ícone padrão ou uma geometria do GLB; o robô vai imediatamente para a posição mostrada no mapa.";
+
   for (const [robotId, entry] of panel._robotEntries?.entries?.() || []) {
     const row = panel.shadowRoot.querySelector(`[data-robot-id="${CSS.escape(robotId)}"]`);
-    if (!row || row.querySelector("[data-map-overlay-box]")) continue;
-    const settings = settingsFor(robotId);
-    const [minX, maxX] = modelRange(panel, "x");
-    const [minZ, maxZ] = modelRange(panel, "z");
-    const box = document.createElement("details");
-    box.className = "ha3dMapOverlayBox";
-    box.dataset.mapOverlayBox = "";
-    box.open = true;
-    box.innerHTML = `
-      <summary>Mapa Xiaomi / Map Extractor</summary>
-      <label class="ha3dMapToggle"><input type="checkbox" data-map-visible ${settings.visible ? "checked" : ""}> Mostrar mapa no piso e usar para posição do robô</label>
-      ${control("X", "x", settings.x, minX, maxX, 0.02)}
-      ${control("Z", "z", settings.z, minZ, maxZ, 0.02)}
-      ${control("Altura", "y", settings.y, -2, 5, 0.01)}
-      ${control("Escala", "scale", settings.scale, 0.001, 0.12, 0.001)}
-      ${control("Rotação", "rotation", settings.rotation, -180, 180, 1)}
-      ${control("Opacidade", "opacity", settings.opacity, 0, 1, 0.05)}
-      <div class="ha3dMapActions"><button type="button" data-map-reset class="secondary">Resetar ajuste</button></div>
-      <div class="ha3dMapStatus" data-map-status></div>`;
+    if (!row) continue;
+    hideLegacyCalibration(row);
 
-    const live = row.querySelector("[data-live]");
-    if (live) row.insertBefore(box, live); else row.appendChild(box);
+    const meta = row.querySelector(".ha3dRobotMeta");
+    if (meta) meta.textContent = `Posicionamento pelo Map Extractor · ${entry.config.position_entity}`;
 
-    const commit = (key, raw) => {
-      const current = settingsFor(robotId);
-      current[key] = key === "visible" ? Boolean(raw) : num(raw, current[key]);
-      const saved = saveSettings(robotId, current);
-      const range = box.querySelector(`[data-map-range="${key}"]`);
-      const value = box.querySelector(`[data-map-value="${key}"]`);
-      if (range && range.value !== String(saved[key])) range.value = String(saved[key]);
-      if (value && value.value !== String(saved[key])) value.value = String(saved[key]);
-      ensureMap(panel, entry);
-      if (entry.ha3dMapOverlay && entry.ha3dMapSize) applyPlane(entry.ha3dMapOverlay, saved, entry.ha3dMapSize, entry.config.floor_plane || "xz");
-      updateRobotFromMap(panel, entry, true);
-      refreshStatus(panel, robotId);
-    };
-
-    box.querySelector("[data-map-visible]").addEventListener("change", (event) => commit("visible", event.target.checked));
-    for (const key of ["x", "z", "y", "scale", "rotation", "opacity"]) {
-      box.querySelector(`[data-map-range="${key}"]`).addEventListener("input", (event) => commit(key, event.target.value));
-      box.querySelector(`[data-map-value="${key}"]`).addEventListener("input", (event) => commit(key, event.target.value));
+    const oldSelected = row.querySelector('[data-action="selected"]');
+    if (oldSelected && !oldSelected.dataset.mapModeBound) {
+      const selectedButton = oldSelected.cloneNode(true);
+      selectedButton.dataset.mapModeBound = "1";
+      selectedButton.textContent = "Usar geometria selecionada";
+      oldSelected.replaceWith(selectedButton);
+      const iconButton = document.createElement("button");
+      iconButton.type = "button";
+      iconButton.className = "secondary";
+      iconButton.textContent = "Usar ícone 3D";
+      selectedButton.parentElement?.insertBefore(iconButton, selectedButton);
+      const status = (text) => {
+        const output = row.querySelector("[data-status]");
+        if (output) output.textContent = text;
+      };
+      selectedButton.addEventListener("click", () => useSelectedGeometry(panel, robotId, row, status));
+      iconButton.addEventListener("click", () => useDefaultIcon(panel, robotId, row, status));
     }
-    box.querySelector("[data-map-reset]").addEventListener("click", () => {
-      saveSettings(robotId, DEFAULTS);
-      box.remove();
-      if (entry.ha3dMapOverlay) entry.ha3dMapOverlay.visible = false;
-      installUi(panel);
-      refreshStatus(panel, robotId);
-    });
+
+    if (!row.querySelector("[data-map-overlay-box]")) {
+      const settings = settingsFor(robotId);
+      const [minX, maxX] = modelRange(panel, "x");
+      const [minZ, maxZ] = modelRange(panel, "z");
+      const box = document.createElement("details");
+      box.className = "ha3dMapOverlayBox";
+      box.dataset.mapOverlayBox = "";
+      box.open = true;
+      box.innerHTML = `
+        <summary>Mapa Xiaomi / Map Extractor</summary>
+        <label class="ha3dMapToggle"><input type="checkbox" data-map-visible ${settings.visible ? "checked" : ""}> Mostrar mapa no piso</label>
+        ${control("X", "x", settings.x, minX, maxX, 0.02)}
+        ${control("Z", "z", settings.z, minZ, maxZ, 0.02)}
+        ${control("Altura", "y", settings.y, -2, 5, 0.01)}
+        ${control("Escala", "scale", settings.scale, 0.001, 0.12, 0.001)}
+        ${control("Rotação", "rotation", settings.rotation, -180, 180, 1)}
+        ${control("Opacidade", "opacity", settings.opacity, 0, 1, 0.05)}
+        <div class="ha3dMapActions"><button type="button" data-map-reset class="secondary">Resetar ajuste</button></div>
+        <div class="ha3dMapStatus" data-map-status></div>`;
+
+      const live = row.querySelector("[data-live]");
+      if (live) row.insertBefore(box, live);
+      else row.appendChild(box);
+
+      const commit = (key, raw) => {
+        const current = settingsFor(robotId);
+        current[key] = key === "visible" ? Boolean(raw) : num(raw, current[key]);
+        const saved = saveSettings(robotId, current);
+        const range = box.querySelector(`[data-map-range="${key}"]`);
+        const value = box.querySelector(`[data-map-value="${key}"]`);
+        if (range && range.value !== String(saved[key])) range.value = String(saved[key]);
+        if (value && value.value !== String(saved[key])) value.value = String(saved[key]);
+        ensureMap(panel, entry);
+        if (entry.ha3dMapOverlay && entry.ha3dMapSize) {
+          applyPlane(entry.ha3dMapOverlay, saved, entry.ha3dMapSize, entry.config.floor_plane || "xz");
+        }
+        updateRobotFromMap(panel, entry, true);
+        refreshStatus(panel, robotId);
+      };
+
+      box.querySelector("[data-map-visible]").addEventListener("change", (event) => commit("visible", event.target.checked));
+      for (const key of ["x", "z", "y", "scale", "rotation", "opacity"]) {
+        box.querySelector(`[data-map-range="${key}"]`).addEventListener("input", (event) => commit(key, event.target.value));
+        box.querySelector(`[data-map-value="${key}"]`).addEventListener("input", (event) => commit(key, event.target.value));
+      }
+      box.querySelector("[data-map-reset]").addEventListener("click", () => {
+        saveSettings(robotId, DEFAULTS);
+        box.remove();
+        installUi(panel);
+        ensureMap(panel, entry);
+        updateRobotFromMap(panel, entry, true);
+        refreshStatus(panel, robotId);
+      });
+    }
+
     ensureMap(panel, entry);
+    updateRobotFromMap(panel, entry, true);
     refreshStatus(panel, robotId);
   }
 }
 
-if (!proto.__ha3dRobotMapOverlayV1) {
-  proto.__ha3dRobotMapOverlayV1 = true;
+if (!proto.__ha3dRobotMapOverlayV2) {
+  proto.__ha3dRobotMapOverlayV2 = true;
 
   const originalRender = proto._renderRobotsPanel;
   proto._renderRobotsPanel = function (...args) {
@@ -313,6 +450,7 @@ if (!proto.__ha3dRobotMapOverlayV1) {
     queueMicrotask(() => {
       for (const entry of this._robotEntries?.values?.() || []) ensureMap(this, entry);
       installUi(this);
+      this._updateRobots?.(true);
     });
     return result;
   };
@@ -331,7 +469,10 @@ if (!proto.__ha3dRobotMapOverlayV1) {
   queueMicrotask(() => {
     const walk = (root) => {
       for (const element of root?.querySelectorAll?.("*") || []) {
-        if (element.localName === "ha3d-panel") { installUi(element); element._rebuildRobots?.(); }
+        if (element.localName === "ha3d-panel") {
+          installUi(element);
+          element._rebuildRobots?.();
+        }
         if (element.shadowRoot) walk(element.shadowRoot);
       }
     };
