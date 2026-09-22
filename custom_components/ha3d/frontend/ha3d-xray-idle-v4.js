@@ -68,7 +68,6 @@ function markActivity(panel) {
 function idleAllowed(panel) {
   return Boolean(
     panel?.isConnected &&
-      panel._cinematicEnabled &&
       panel._model &&
       panel._camera &&
       panel._controls &&
