@@ -11,7 +11,7 @@ const proto = Panel.prototype;
 
 const MAP_ENTITY = "image.xiaomi_robot_vacuum_h50_live_map";
 const STORAGE_KEY = "ha3d_xiaomi_map_overlay_v1";
-const DEFAULTS = Object.freeze({ visible: true, x: 0, z: 0, y: 0.02, scale: 0.025, rotation: 0, opacity: 0.55 });
+const DEFAULTS = Object.freeze({ visible: true, x: 0, z: 0, y: 0.02, scale: 0.025, scale_x: 0.025, scale_y: 0.025, rotation: 0, opacity: 0.55 });
 const num = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const offline = (state) => !state || ["unknown", "unavailable"].includes(state.state);
@@ -27,17 +27,29 @@ function readAll() {
 
 function settingsFor(robotId) {
   const all = readAll();
-  return { ...DEFAULTS, ...(all[robotId] || {}) };
+  const stored = all[robotId] || {};
+  const legacyScale = clamp(num(stored.scale, DEFAULTS.scale), 0.0001, 10);
+  return {
+    ...DEFAULTS,
+    ...stored,
+    scale_x: clamp(num(stored.scale_x, legacyScale), 0.0001, 10),
+    scale_y: clamp(num(stored.scale_y, legacyScale), 0.0001, 10),
+  };
 }
 
 function saveSettings(robotId, value) {
   const all = readAll();
+  const legacyScale = clamp(num(value.scale, DEFAULTS.scale), 0.0001, 10);
+  const scaleX = clamp(num(value.scale_x, legacyScale), 0.0001, 10);
+  const scaleY = clamp(num(value.scale_y, legacyScale), 0.0001, 10);
   all[robotId] = {
     visible: Boolean(value.visible),
     x: num(value.x),
     z: num(value.z),
     y: num(value.y, DEFAULTS.y),
-    scale: clamp(num(value.scale, DEFAULTS.scale), 0.0001, 10),
+    scale: scaleX,
+    scale_x: scaleX,
+    scale_y: scaleY,
     rotation: num(value.rotation),
     opacity: clamp(num(value.opacity, DEFAULTS.opacity), 0, 1),
   };
@@ -122,9 +134,11 @@ function pixelToFloor(position, calibration, settings, imageSize) {
   if (!position || !calibration || !imageSize?.width || !imageSize?.height) return null;
   const px = calibration.ux * position.x + calibration.uy * position.y + calibration.ut;
   const py = calibration.vx * position.x + calibration.vy * position.y + calibration.vt;
-  const scale = num(settings.scale, DEFAULTS.scale);
-  const u = (px - imageSize.width / 2) * scale;
-  const v = (py - imageSize.height / 2) * scale;
+  const legacyScale = num(settings.scale, DEFAULTS.scale);
+  const scaleX = num(settings.scale_x, legacyScale);
+  const scaleY = num(settings.scale_y, legacyScale);
+  const u = (px - imageSize.width / 2) * scaleX;
+  const v = (py - imageSize.height / 2) * scaleY;
   // PlaneGeometry is flipped onto XZ, so map-pixel rotation uses the opposite sign.
   const r = THREE.MathUtils.degToRad(-num(settings.rotation));
   const cos = Math.cos(r);
@@ -149,8 +163,10 @@ function disposeMap(entry) {
 }
 
 function applyPlane(mesh, settings, size, plane = "xz") {
-  const scale = num(settings.scale, DEFAULTS.scale);
-  mesh.scale.set(size.width * scale, size.height * scale, 1);
+  const legacyScale = num(settings.scale, DEFAULTS.scale);
+  const scaleX = num(settings.scale_x, legacyScale);
+  const scaleY = num(settings.scale_y, legacyScale);
+  mesh.scale.set(size.width * scaleX, size.height * scaleY, 1);
   mesh.position.copy(floorVector(num(settings.x), num(settings.z), num(settings.y, DEFAULTS.y), plane));
   mesh.rotation.set(0, 0, 0);
   const angle = THREE.MathUtils.degToRad(num(settings.rotation));
@@ -410,7 +426,8 @@ function installUi(panel) {
         ${control("X", "x", settings.x, minX, maxX, 0.02)}
         ${control("Z", "z", settings.z, minZ, maxZ, 0.02)}
         ${control("Altura", "y", settings.y, -2, 5, 0.01)}
-        ${control("Escala", "scale", settings.scale, 0.001, 0.12, 0.001)}
+        ${control("Escala X", "scale_x", settings.scale_x, 0.001, 0.12, 0.001)}
+        ${control("Escala Y", "scale_y", settings.scale_y, 0.001, 0.12, 0.001)}
         ${control("Rotação", "rotation", settings.rotation, -180, 180, 1)}
         ${control("Opacidade", "opacity", settings.opacity, 0, 1, 0.05)}
         <div class="ha3dMapActions"><button type="button" data-map-reset class="secondary">Resetar ajuste</button></div>
@@ -437,7 +454,7 @@ function installUi(panel) {
       };
 
       box.querySelector("[data-map-visible]").addEventListener("change", (event) => commit("visible", event.target.checked));
-      for (const key of ["x", "z", "y", "scale", "rotation", "opacity"]) {
+      for (const key of ["x", "z", "y", "scale_x", "scale_y", "rotation", "opacity"]) {
         box.querySelector(`[data-map-range="${key}"]`).addEventListener("input", (event) => commit(key, event.target.value));
         box.querySelector(`[data-map-value="${key}"]`).addEventListener("input", (event) => commit(key, event.target.value));
       }

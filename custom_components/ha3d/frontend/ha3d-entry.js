@@ -32,6 +32,6 @@ import "./ha3d-icon-standard.js?v=mdi-standard-2";
 import "./ha3d-easy-floorplan-test.js?v=easy-floorplan-test-3";
 import "./ha3d-editor-drag-hotfix.js?v=editor-drag-hotfix-1";
 import "./ha3d-robot-trackers.js?v=robot-trackers-9";
-import "./ha3d-robot-map-overlay.js?v=robot-map-overlay-4";
+import "./ha3d-robot-map-overlay.js?v=robot-map-overlay-5";
 import "./ha3d-robot-map-hotfix.js?v=robot-map-hotfix-1";
 import "./ha3d-robot-map-shared-config.js?v=robot-map-shared-config-1";
