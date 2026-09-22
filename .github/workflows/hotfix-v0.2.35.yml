@@ -21,41 +21,13 @@ jobs:
         run: |
           python - <<'PY'
           import json
+          import re
           from pathlib import Path
 
           path = Path('custom_components/ha3d/frontend/ha3d-cinematic-off-v2.js')
           s = path.read_text(encoding='utf-8')
 
-          old = '''  const applyToggle = (event = null) => {
-            const enabled = Boolean(toggle.checked);
-            panel._cinematicEnabled = enabled;
-            localStorage.setItem(CINEMATIC_KEY, enabled ? "1" : "0");
-            if (testButton) testButton.disabled = !enabled;
-
-            if (!enabled) cancelCinematic(panel);
-
-            // Own the toggle event so the older guard cannot cancel unrelated camera
-            // animations or force the default view after Cinematic is turned off.
-            if (event) event.stopImmediatePropagation();
-          };
-
-          toggle.addEventListener("change", applyToggle, true);
-
-          if (testButton) {
-            testButton.addEventListener(
-              "click",
-              (event) => {
-                if (panel._cinematicEnabled) return;
-                event.preventDefault();
-                event.stopImmediatePropagation();
-              },
-              true,
-            );
-          }
-
-          applyToggle();'''
-
-          new = '''  // Startup is read-only: persisted preference is the source of truth.
+          replacement = '''  // Startup is read-only: persisted preference is the source of truth.
           // Never write the checkbox's transient initial state back to storage here,
           // because the control can exist for a frame before its checked state is synced.
           const stored = localStorage.getItem(CINEMATIC_KEY);
@@ -95,9 +67,11 @@ jobs:
             );
           }'''
 
-          if old not in s:
-              raise SystemExit('cinematic startup guard anchor not found')
-          path.write_text(s.replace(old, new, 1), encoding='utf-8')
+          pattern = r'  const applyToggle = \(event = null\) => \{.*?\n  applyToggle\(\);'
+          s, count = re.subn(pattern, replacement, s, count=1, flags=re.S)
+          if count != 1:
+              raise SystemExit(f'cinematic startup guard replacement count={count}')
+          path.write_text(s, encoding='utf-8')
 
           entry = Path('custom_components/ha3d/frontend/ha3d-entry.js')
           e = entry.read_text(encoding='utf-8')
