@@ -17,6 +17,7 @@ from .const import (
     PANEL_URL_PATH,
     STATIC_URL,
 )
+from .floating_widgets import HA3DFloatingWidgetsView
 from .http import HA3DAreasView, HA3DConfigView, HA3DModelUploadView
 from .scene_assets import HA3DSceneAssetUploadView, HA3DSceneAssetsView
 from .storage import HA3DStore
@@ -48,6 +49,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.http.register_view(HA3DVirtualLightsView(store))
         hass.http.register_view(HA3DSceneAssetsView(hass, store))
         hass.http.register_view(HA3DSceneAssetUploadView(hass, store))
+        hass.http.register_view(HA3DFloatingWidgetsView(store))
         runtime["http_registered"] = True
 
     model_path = Path(hass.config.path(MODEL_RELATIVE_PATH))
