@@ -33,6 +33,7 @@ import "./ha3d-easy-floorplan-test.js?v=easy-floorplan-test-3";
 import "./ha3d-editor-drag-hotfix.js?v=editor-drag-hotfix-1";
 import "./ha3d-editor-object-root.js?v=editor-object-root-2";
 import "./ha3d-editor-gizmo-persistence-fix.js?v=editor-gizmo-persistence-2";
+import "./ha3d-binding-editor-override.js?v=binding-editor-override-1";
 import "./ha3d-robot-trackers.js?v=robot-trackers-9";
 import "./ha3d-robot-map-overlay.js?v=robot-map-overlay-5";
 import "./ha3d-robot-map-hotfix.js?v=robot-map-hotfix-1";
