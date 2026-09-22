@@ -1,0 +1,19 @@
+name: Publish HA3D v0.2.18
+
+on:
+  push:
+    paths:
+      - '.github/workflows/release-v0.2.18.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish v0.2.18
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view v0.2.18 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create v0.2.18 --repo "$GITHUB_REPOSITORY" --target "5f0672e99104c09705fd04a874200ef00bb67f73" --title "HA3D v0.2.18" --notes "Restore the classic HA3D X-Ray edge rendering used before the silhouette experiment. Removes the silhouette shader and brings back all geometry edges while preserving the robot/map improvements from v0.2.15. Rollback branch: pre-return-to-edges-0.2.17."
