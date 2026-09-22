@@ -15,74 +15,25 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Use Map Extractor vacuum_position as primary source
+      - name: Patch, validate, publish
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           python - <<'PY'
           from pathlib import Path
-          import re
-
+          import base64, re
           overlay = Path('custom_components/ha3d/frontend/ha3d-robot-map-overlay.js')
           text = overlay.read_text(encoding='utf-8')
-
+          repl = base64.b64decode('ZnVuY3Rpb24gcG9zaXRpb25Gcm9tVmFsdWUodmFsdWUsIGNoYW5nZWQsIHNvdXJjZU5hbWUpIHsKICBpZiAodmFsdWUgPT0gbnVsbCkgcmV0dXJuIG51bGw7CiAgbGV0IHNvdXJjZSA9IHZhbHVlOwogIGlmICh0eXBlb2Ygc291cmNlID09PSAic3RyaW5nIikgewogICAgdHJ5IHsgc291cmNlID0gSlNPTi5wYXJzZShzb3VyY2UpOyB9IGNhdGNoIChfZXJyb3IpIHsgcmV0dXJuIG51bGw7IH0KICB9CiAgaWYgKEFycmF5LmlzQXJyYXkoc291cmNlKSkgewogICAgY29uc3QgeCA9IE51bWJlcihzb3VyY2VbMF0pOwogICAgY29uc3QgeSA9IE51bWJlcihzb3VyY2VbMV0pOwogICAgY29uc3QgaGVhZGluZyA9IE51bWJlcihzb3VyY2VbMl0pOwogICAgaWYgKCFOdW1iZXIuaXNGaW5pdGUoeCkgfHwgIU51bWJlci5pc0Zpbml0ZSh5KSkgcmV0dXJuIG51bGw7CiAgICByZXR1cm4geyB4LCB5LCBoZWFkaW5nOiBOdW1iZXIuaXNGaW5pdGUoaGVhZGluZykgPyBoZWFkaW5nIDogMCwgY2hhbmdlZCwgc291cmNlOiBzb3VyY2VOYW1lIH07CiAgfQogIGlmICh0eXBlb2Ygc291cmNlICE9PSAib2JqZWN0IikgcmV0dXJuIG51bGw7CiAgY29uc3QgZW1iZWRkZWQgPSBzb3VyY2UudmFjdXVtX3Bvc2l0aW9uID8/IHNvdXJjZS5wb3NpdGlvbjsKICBpZiAoZW1iZWRkZWQgJiYgZW1iZWRkZWQgIT09IHNvdXJjZSkgcmV0dXJuIHBvc2l0aW9uRnJvbVZhbHVlKGVtYmVkZGVkLCBjaGFuZ2VkLCBzb3VyY2VOYW1lKTsKICBjb25zdCB4ID0gTnVtYmVyKHNvdXJjZS54KTsKICBjb25zdCB5ID0gTnVtYmVyKHNvdXJjZS55KTsKICBjb25zdCBoZWFkaW5nID0gTnVtYmVyKHNvdXJjZS5hID8/IHNvdXJjZS5oZWFkaW5nID8/IHNvdXJjZS5hbmdsZSk7CiAgaWYgKCFOdW1iZXIuaXNGaW5pdGUoeCkgfHwgIU51bWJlci5pc0Zpbml0ZSh5KSkgcmV0dXJuIG51bGw7CiAgcmV0dXJuIHsgeCwgeSwgaGVhZGluZzogTnVtYmVyLmlzRmluaXRlKGhlYWRpbmcpID8gaGVhZGluZyA6IDAsIGNoYW5nZWQsIHNvdXJjZTogc291cmNlTmFtZSB9Owp9CgpmdW5jdGlvbiBnZXRQb3NpdGlvbihoYXNzLCBlbnRpdHlJZCkgewogIC8vIFByaW1hcnkgc291cmNlOiB0aGUgc2FtZSB2YWN1dW1fcG9zaXRpb24gYXR0cmlidXRlIHVzZWQgYnkgWGlhb21pIENsb3VkIE1hcCBFeHRyYWN0b3IKICAvLyB0byByZW5kZXIgdGhlIHZhY3V1bSBvbiBpdHMgbGl2ZSBtYXAuIFRoaXMga2VlcHMgSEEzRCBzeW5jaHJvbml6ZWQgd2l0aCBlYWNoIG1hcCByZWZyZXNoLgogIGNvbnN0IG1hcFN0YXRlID0gaGFzcz8uc3RhdGVzPy5bTUFQX0VOVElUWV07CiAgY29uc3QgbWFwQ2hhbmdlZCA9IG1hcFN0YXRlPy5sYXN0X3VwZGF0ZWQgfHwgbWFwU3RhdGU/Lmxhc3RfY2hhbmdlZDsKICBjb25zdCBtYXBQb3NpdGlvbiA9IHBvc2l0aW9uRnJvbVZhbHVlKG1hcFN0YXRlPy5hdHRyaWJ1dGVzPy52YWN1dW1fcG9zaXRpb24sIG1hcENoYW5nZWQsICJtYXBfZXh0cmFjdG9yIik7CiAgaWYgKG1hcFBvc2l0aW9uKSByZXR1cm4gbWFwUG9zaXRpb247CgogIC8vIEZhbGxiYWNrOiBrZWVwIHRoZSBjb25maWd1cmVkIFhpYW9taSBwb3NpdGlvbiBzZW5zb3IgZm9yIG1hcHMgdGhhdCBkbyBub3QgZXhwb3NlCiAgLy8gdmFjdXVtX3Bvc2l0aW9uIG9yIHdoaWxlIHRoZSBtYXAgZW50aXR5IGlzIHRlbXBvcmFyaWx5IHVuYXZhaWxhYmxlLgogIGNvbnN0IHN0YXRlID0gaGFzcz8uc3RhdGVzPy5bZW50aXR5SWRdOwogIGlmIChvZmZsaW5lKHN0YXRlKSkgcmV0dXJuIG51bGw7CiAgY29uc3QgY2hhbmdlZCA9IHN0YXRlLmxhc3RfdXBkYXRlZCB8fCBzdGF0ZS5sYXN0X2NoYW5nZWQ7CiAgY29uc3QgZnJvbUF0dHJpYnV0ZXMgPSBwb3NpdGlvbkZyb21WYWx1ZShzdGF0ZS5hdHRyaWJ1dGVzIHx8IHt9LCBjaGFuZ2VkLCAic2Vuc29yX2ZhbGxiYWNrIik7CiAgaWYgKGZyb21BdHRyaWJ1dGVzKSByZXR1cm4gZnJvbUF0dHJpYnV0ZXM7CiAgcmV0dXJuIHBvc2l0aW9uRnJvbVZhbHVlKHN0YXRlLnN0YXRlLCBjaGFuZ2VkLCAic2Vuc29yX2ZhbGxiYWNrIik7Cn0KCmZ1bmN0aW9uIG1hcENhbGlicmF0aW9u').decode()
           pattern = re.compile(r'function getPosition\(hass, entityId\) \{.*?\n\}\n\nfunction mapCalibration', re.S)
-          replacement = r'''function positionFromValue(value, changed, sourceName) {
-  if (value == null) return null;
-  let source = value;
-  if (typeof source === "string") {
-    try { source = JSON.parse(source); } catch (_error) { return null; }
-  }
-  if (Array.isArray(source)) {
-    const x = Number(source[0]);
-    const y = Number(source[1]);
-    const heading = Number(source[2]);
-    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
-    return { x, y, heading: Number.isFinite(heading) ? heading : 0, changed, source: sourceName };
-  }
-  if (typeof source !== "object") return null;
-  const embedded = source.vacuum_position ?? source.position;
-  if (embedded && embedded !== source) return positionFromValue(embedded, changed, sourceName);
-  const x = Number(source.x);
-  const y = Number(source.y);
-  const heading = Number(source.a ?? source.heading ?? source.angle);
-  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
-  return { x, y, heading: Number.isFinite(heading) ? heading : 0, changed, source: sourceName };
-}
-
-function getPosition(hass, entityId) {
-  // Primary source: the same vacuum_position attribute used by Xiaomi Cloud Map Extractor
-  // to render the vacuum on its live map. This keeps HA3D synchronized with each map refresh.
-  const mapState = hass?.states?.[MAP_ENTITY];
-  const mapChanged = mapState?.last_updated || mapState?.last_changed;
-  const mapPosition = positionFromValue(mapState?.attributes?.vacuum_position, mapChanged, "map_extractor");
-  if (mapPosition) return mapPosition;
-
-  // Fallback: keep the configured Xiaomi position sensor for maps that do not expose
-  // vacuum_position or while the map entity is temporarily unavailable.
-  const state = hass?.states?.[entityId];
-  if (offline(state)) return null;
-  const changed = state.last_updated || state.last_changed;
-  const fromAttributes = positionFromValue(state.attributes || {}, changed, "sensor_fallback");
-  if (fromAttributes) return fromAttributes;
-  return positionFromValue(state.state, changed, "sensor_fallback");
-}
-
-function mapCalibration'''
-
-          text, count = pattern.subn(replacement, text, count=1)
+          text, count = pattern.subn(repl, text, count=1)
           if count != 1:
               raise SystemExit(f'getPosition replacement count={count}')
-
           old_status = '  if (live) live.textContent = `${stale ? "Última posição conhecida" : "Posição pelo mapa"} · X ${position.x} · Y ${position.y}`;'
-          new_status = '''  if (live) {
-    const sourceLabel = position.source === "map_extractor" ? "Map Extractor" : "sensor (fallback)";
-    live.textContent = `${stale ? "Última posição conhecida" : `Posição ${sourceLabel}`} · X ${position.x} · Y ${position.y}`;
-  }'''
+          new_status = base64.b64decode('ICBpZiAobGl2ZSkgewogICAgY29uc3Qgc291cmNlTGFiZWwgPSBwb3NpdGlvbi5zb3VyY2UgPT09ICJtYXBfZXh0cmFjdG9yIiA/ICJNYXAgRXh0cmFjdG9yIiA6ICJzZW5zb3IgKGZhbGxiYWNrKSI7CiAgICBsaXZlLnRleHRDb250ZW50ID0gYCR7c3RhbGUgPyAiw5psdGltYSBwb3Npw6fDo28gY29uaGVjaWRhIiA6IGBQb3Npw6fDo28gJHtzb3VyY2VMYWJlbH1gfSDCtyBYICR7cG9zaXRpb24ueH0gwrcgWSAke3Bvc2l0aW9uLnl9YDsKICB9').decode()
           if old_status not in text:
               raise SystemExit('live position status line not found')
-          text = text.replace(old_status, new_status, 1)
-          overlay.write_text(text, encoding='utf-8')
-
+          overlay.write_text(text.replace(old_status, new_status, 1), encoding='utf-8')
           entry = Path('custom_components/ha3d/frontend/ha3d-entry.js')
           text = entry.read_text(encoding='utf-8')
           old = 'import "./ha3d-robot-map-overlay.js?v=robot-map-overlay-3";'
@@ -90,34 +41,23 @@ function mapCalibration'''
           if old not in text:
               raise SystemExit('overlay cache token not found')
           entry.write_text(text.replace(old, new, 1), encoding='utf-8')
-
           manifest = Path('custom_components/ha3d/manifest.json')
           text = manifest.read_text(encoding='utf-8')
-          old = '"version": "0.2.13"'
-          new = '"version": "0.2.14"'
-          if old not in text:
+          if '"version": "0.2.13"' not in text:
               raise SystemExit('manifest version not found')
-          manifest.write_text(text.replace(old, new, 1), encoding='utf-8')
-
+          manifest.write_text(text.replace('"version": "0.2.13"', '"version": "0.2.14"', 1), encoding='utf-8')
           init = Path('custom_components/ha3d/__init__.py')
           text = init.read_text(encoding='utf-8')
-          old = 'FRONTEND_VERSION = "0.2.13"'
-          new = 'FRONTEND_VERSION = "0.2.14"'
-          if old not in text:
+          if 'FRONTEND_VERSION = "0.2.13"' not in text:
               raise SystemExit('frontend version not found')
-          init.write_text(text.replace(old, new, 1), encoding='utf-8')
+          init.write_text(text.replace('FRONTEND_VERSION = "0.2.13"', 'FRONTEND_VERSION = "0.2.14"', 1), encoding='utf-8')
           PY
-
           node --check custom_components/ha3d/frontend/ha3d-robot-map-overlay.js
           python -m compileall -q custom_components/ha3d
-
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add custom_components/ha3d/frontend/ha3d-robot-map-overlay.js custom_components/ha3d/frontend/ha3d-entry.js custom_components/ha3d/manifest.json custom_components/ha3d/__init__.py
           git commit -m "Use Map Extractor position for Xiaomi robot"
           git push origin HEAD:main
-
           SHA=$(git rev-parse HEAD)
           gh release view v0.2.14 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create v0.2.14 --repo "$GITHUB_REPOSITORY" --target "$SHA" --title "HA3D v0.2.14" --notes "Use Xiaomi Cloud Map Extractor vacuum_position as the primary live robot position source, synchronized with map refreshes. The existing Xiaomi position sensor remains as automatic fallback. Keeps the tested v0.2.13 map alignment, height and rotation behavior unchanged."
-        env:
-          GH_TOKEN: ${{ github.token }}
