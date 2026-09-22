@@ -1,0 +1,123 @@
+name: Patch HA3D v0.2.14 Map Extractor position
+
+on:
+  push:
+    paths:
+      - '.github/workflows/patch-v0.2.14-map-position.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Use Map Extractor vacuum_position as primary source
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          overlay = Path('custom_components/ha3d/frontend/ha3d-robot-map-overlay.js')
+          text = overlay.read_text(encoding='utf-8')
+
+          pattern = re.compile(r'function getPosition\(hass, entityId\) \{.*?\n\}\n\nfunction mapCalibration', re.S)
+          replacement = r'''function positionFromValue(value, changed, sourceName) {
+  if (value == null) return null;
+  let source = value;
+  if (typeof source === "string") {
+    try { source = JSON.parse(source); } catch (_error) { return null; }
+  }
+  if (Array.isArray(source)) {
+    const x = Number(source[0]);
+    const y = Number(source[1]);
+    const heading = Number(source[2]);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    return { x, y, heading: Number.isFinite(heading) ? heading : 0, changed, source: sourceName };
+  }
+  if (typeof source !== "object") return null;
+  const embedded = source.vacuum_position ?? source.position;
+  if (embedded && embedded !== source) return positionFromValue(embedded, changed, sourceName);
+  const x = Number(source.x);
+  const y = Number(source.y);
+  const heading = Number(source.a ?? source.heading ?? source.angle);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return { x, y, heading: Number.isFinite(heading) ? heading : 0, changed, source: sourceName };
+}
+
+function getPosition(hass, entityId) {
+  // Primary source: the same vacuum_position attribute used by Xiaomi Cloud Map Extractor
+  // to render the vacuum on its live map. This keeps HA3D synchronized with each map refresh.
+  const mapState = hass?.states?.[MAP_ENTITY];
+  const mapChanged = mapState?.last_updated || mapState?.last_changed;
+  const mapPosition = positionFromValue(mapState?.attributes?.vacuum_position, mapChanged, "map_extractor");
+  if (mapPosition) return mapPosition;
+
+  // Fallback: keep the configured Xiaomi position sensor for maps that do not expose
+  // vacuum_position or while the map entity is temporarily unavailable.
+  const state = hass?.states?.[entityId];
+  if (offline(state)) return null;
+  const changed = state.last_updated || state.last_changed;
+  const fromAttributes = positionFromValue(state.attributes || {}, changed, "sensor_fallback");
+  if (fromAttributes) return fromAttributes;
+  return positionFromValue(state.state, changed, "sensor_fallback");
+}
+
+function mapCalibration'''
+
+          text, count = pattern.subn(replacement, text, count=1)
+          if count != 1:
+              raise SystemExit(f'getPosition replacement count={count}')
+
+          old_status = '  if (live) live.textContent = `${stale ? "Última posição conhecida" : "Posição pelo mapa"} · X ${position.x} · Y ${position.y}`;'
+          new_status = '''  if (live) {
+    const sourceLabel = position.source === "map_extractor" ? "Map Extractor" : "sensor (fallback)";
+    live.textContent = `${stale ? "Última posição conhecida" : `Posição ${sourceLabel}`} · X ${position.x} · Y ${position.y}`;
+  }'''
+          if old_status not in text:
+              raise SystemExit('live position status line not found')
+          text = text.replace(old_status, new_status, 1)
+          overlay.write_text(text, encoding='utf-8')
+
+          entry = Path('custom_components/ha3d/frontend/ha3d-entry.js')
+          text = entry.read_text(encoding='utf-8')
+          old = 'import "./ha3d-robot-map-overlay.js?v=robot-map-overlay-3";'
+          new = 'import "./ha3d-robot-map-overlay.js?v=robot-map-overlay-4";'
+          if old not in text:
+              raise SystemExit('overlay cache token not found')
+          entry.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          manifest = Path('custom_components/ha3d/manifest.json')
+          text = manifest.read_text(encoding='utf-8')
+          old = '"version": "0.2.13"'
+          new = '"version": "0.2.14"'
+          if old not in text:
+              raise SystemExit('manifest version not found')
+          manifest.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          init = Path('custom_components/ha3d/__init__.py')
+          text = init.read_text(encoding='utf-8')
+          old = 'FRONTEND_VERSION = "0.2.13"'
+          new = 'FRONTEND_VERSION = "0.2.14"'
+          if old not in text:
+              raise SystemExit('frontend version not found')
+          init.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+
+          node --check custom_components/ha3d/frontend/ha3d-robot-map-overlay.js
+          python -m compileall -q custom_components/ha3d
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add custom_components/ha3d/frontend/ha3d-robot-map-overlay.js custom_components/ha3d/frontend/ha3d-entry.js custom_components/ha3d/manifest.json custom_components/ha3d/__init__.py
+          git commit -m "Use Map Extractor position for Xiaomi robot"
+          git push origin HEAD:main
+
+          SHA=$(git rev-parse HEAD)
+          gh release view v0.2.14 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create v0.2.14 --repo "$GITHUB_REPOSITORY" --target "$SHA" --title "HA3D v0.2.14" --notes "Use Xiaomi Cloud Map Extractor vacuum_position as the primary live robot position source, synchronized with map refreshes. The existing Xiaomi position sensor remains as automatic fallback. Keeps the tested v0.2.13 map alignment, height and rotation behavior unchanged."
+        env:
+          GH_TOKEN: ${{ github.token }}
