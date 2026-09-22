@@ -45,25 +45,45 @@ function saveSettings(robotId, value) {
   return all[robotId];
 }
 
-function getPosition(hass, entityId) {
-  const state = hass?.states?.[entityId];
-  if (offline(state)) return null;
-  let source = state.attributes || {};
-  if (![source.x, source.y, source.a].some((value) => value !== undefined)) {
-    try { source = { ...source, ...JSON.parse(state.state) }; } catch (_error) { /* normal */ }
+function positionFromValue(value, changed, sourceName) {
+  if (value == null) return null;
+  let source = value;
+  if (typeof source === "string") {
+    try { source = JSON.parse(source); } catch (_error) { return null; }
   }
-  const embedded = source.vacuum_position || source.position;
-  if (embedded && typeof embedded === "object") source = { ...source, ...embedded };
+  if (Array.isArray(source)) {
+    const x = Number(source[0]);
+    const y = Number(source[1]);
+    const heading = Number(source[2]);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    return { x, y, heading: Number.isFinite(heading) ? heading : 0, changed, source: sourceName };
+  }
+  if (typeof source !== "object") return null;
+  const embedded = source.vacuum_position ?? source.position;
+  if (embedded && embedded !== source) return positionFromValue(embedded, changed, sourceName);
   const x = Number(source.x);
   const y = Number(source.y);
   const heading = Number(source.a ?? source.heading ?? source.angle);
   if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
-  return {
-    x,
-    y,
-    heading: Number.isFinite(heading) ? heading : 0,
-    changed: state.last_updated || state.last_changed,
-  };
+  return { x, y, heading: Number.isFinite(heading) ? heading : 0, changed, source: sourceName };
+}
+
+function getPosition(hass, entityId) {
+  // Primary source: the same vacuum_position attribute used by Xiaomi Cloud Map Extractor
+  // to render the vacuum on its live map. This keeps HA3D synchronized with each map refresh.
+  const mapState = hass?.states?.[MAP_ENTITY];
+  const mapChanged = mapState?.last_updated || mapState?.last_changed;
+  const mapPosition = positionFromValue(mapState?.attributes?.vacuum_position, mapChanged, "map_extractor");
+  if (mapPosition) return mapPosition;
+
+  // Fallback: keep the configured Xiaomi position sensor for maps that do not expose
+  // vacuum_position or while the map entity is temporarily unavailable.
+  const state = hass?.states?.[entityId];
+  if (offline(state)) return null;
+  const changed = state.last_updated || state.last_changed;
+  const fromAttributes = positionFromValue(state.attributes || {}, changed, "sensor_fallback");
+  if (fromAttributes) return fromAttributes;
+  return positionFromValue(state.state, changed, "sensor_fallback");
 }
 
 function mapCalibration(hass) {
@@ -265,7 +285,10 @@ function updateRobotFromMap(panel, entry, snap = false) {
       }
     });
   }
-  if (live) live.textContent = `${stale ? "Última posição conhecida" : "Posição pelo mapa"} · X ${position.x} · Y ${position.y}`;
+  if (live) {
+    const sourceLabel = position.source === "map_extractor" ? "Map Extractor" : "sensor (fallback)";
+    live.textContent = `${stale ? "Última posição conhecida" : `Posição ${sourceLabel}`} · X ${position.x} · Y ${position.y}`;
+  }
 }
 
 function refreshStatus(panel, robotId, forced = "") {
