@@ -1,0 +1,62 @@
+name: Publish HA3D v0.2.44 scene assets
+
+on:
+  push:
+    paths:
+      - .github/workflows/release-v0.2.44.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify release contents
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          manifest=json.loads(Path('custom_components/ha3d/manifest.json').read_text())
+          assert manifest['version']=='0.2.44'
+          init=Path('custom_components/ha3d/__init__.py').read_text()
+          assert 'FRONTEND_VERSION = "0.2.44"' in init
+          assert 'HA3DSceneAssetsView' in init and 'HA3DSceneAssetUploadView' in init
+          storage=Path('custom_components/ha3d/storage.py').read_text()
+          assert '"scene_assets": []' in storage
+          api=Path('custom_components/ha3d/scene_assets.py').read_text()
+          for marker in ['/api/ha3d/scene_assets', '/api/ha3d/scene_assets/upload', 'invalid_glb', 'unknown_scene_asset']:
+              assert marker in api
+          entry=Path('custom_components/ha3d/frontend/ha3d-entry.js').read_text()
+          assert 'ha3d-scene-assets.js?v=scene-assets-1' in entry
+          frontend=Path('custom_components/ha3d/frontend/ha3d-scene-assets.js').read_text()
+          for marker in ['+ GLB à cena', '_uploadSceneAsset', '_removeSceneAsset', '_persistSelectedTransform', 'ha3dSceneAssetId']:
+              assert marker in frontend
+          PY
+      - name: Run validation
+        run: |
+          python -m compileall -q custom_components/ha3d
+          npm run check
+          npm test
+          python -m unittest discover -s tests -p 'test_*.py'
+      - name: Tag release
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a v0.2.44 -m "HA3D v0.2.44"
+          git push origin v0.2.44
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v0.2.44 --title "HA3D v0.2.44" --notes "Adiciona importação de GLB secundário sem substituir o modelo principal. No Editor Mode, + GLB à cena envia um arquivo para a pasta de assets do HA3D, carrega-o como um grupo independente e permite selecionar, mover, rotacionar, escalar, renomear, ocultar e remover o asset. A transformação fica persistida em scene_assets, separada de object_positions. Objetos internos do GLB continuam participando do auto-binding por entity_id e luzes exportadas no asset entram na iluminação do HA3D. O model.glb principal permanece intacto e a v0.2.43 continua disponível como rollback."
