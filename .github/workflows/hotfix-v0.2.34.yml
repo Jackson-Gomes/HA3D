@@ -1,0 +1,178 @@
+name: Publish HA3D v0.2.34 independent map X/Y scale
+
+on:
+  push:
+    paths:
+      - .github/workflows/hotfix-v0.2.34.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  hotfix-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Add independent map X/Y scale controls
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path('custom_components/ha3d/frontend/ha3d-robot-map-overlay.js')
+          s = path.read_text(encoding='utf-8')
+
+          old = 'const DEFAULTS = Object.freeze({ visible: true, x: 0, z: 0, y: 0.02, scale: 0.025, rotation: 0, opacity: 0.55 });'
+          new = 'const DEFAULTS = Object.freeze({ visible: true, x: 0, z: 0, y: 0.02, scale: 0.025, scale_x: 0.025, scale_y: 0.025, rotation: 0, opacity: 0.55 });'
+          if old not in s:
+              raise SystemExit('DEFAULTS anchor not found')
+          s = s.replace(old, new, 1)
+
+          old = '''function settingsFor(robotId) {
+            const all = readAll();
+            return { ...DEFAULTS, ...(all[robotId] || {}) };
+          }'''
+          new = '''function settingsFor(robotId) {
+            const all = readAll();
+            const stored = all[robotId] || {};
+            const legacyScale = clamp(num(stored.scale, DEFAULTS.scale), 0.0001, 10);
+            return {
+              ...DEFAULTS,
+              ...stored,
+              scale_x: clamp(num(stored.scale_x, legacyScale), 0.0001, 10),
+              scale_y: clamp(num(stored.scale_y, legacyScale), 0.0001, 10),
+            };
+          }'''
+          if old not in s:
+              raise SystemExit('settingsFor anchor not found')
+          s = s.replace(old, new, 1)
+
+          old = '''function saveSettings(robotId, value) {
+            const all = readAll();
+            all[robotId] = {
+              visible: Boolean(value.visible),
+              x: num(value.x),
+              z: num(value.z),
+              y: num(value.y, DEFAULTS.y),
+              scale: clamp(num(value.scale, DEFAULTS.scale), 0.0001, 10),
+              rotation: num(value.rotation),
+              opacity: clamp(num(value.opacity, DEFAULTS.opacity), 0, 1),
+            };
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
+            return all[robotId];
+          }'''
+          new = '''function saveSettings(robotId, value) {
+            const all = readAll();
+            const legacyScale = clamp(num(value.scale, DEFAULTS.scale), 0.0001, 10);
+            const scaleX = clamp(num(value.scale_x, legacyScale), 0.0001, 10);
+            const scaleY = clamp(num(value.scale_y, legacyScale), 0.0001, 10);
+            all[robotId] = {
+              visible: Boolean(value.visible),
+              x: num(value.x),
+              z: num(value.z),
+              y: num(value.y, DEFAULTS.y),
+              scale: scaleX,
+              scale_x: scaleX,
+              scale_y: scaleY,
+              rotation: num(value.rotation),
+              opacity: clamp(num(value.opacity, DEFAULTS.opacity), 0, 1),
+            };
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
+            return all[robotId];
+          }'''
+          if old not in s:
+              raise SystemExit('saveSettings anchor not found')
+          s = s.replace(old, new, 1)
+
+          old = '''  const scale = num(settings.scale, DEFAULTS.scale);
+            const u = (px - imageSize.width / 2) * scale;
+            const v = (py - imageSize.height / 2) * scale;'''
+          new = '''  const legacyScale = num(settings.scale, DEFAULTS.scale);
+            const scaleX = num(settings.scale_x, legacyScale);
+            const scaleY = num(settings.scale_y, legacyScale);
+            const u = (px - imageSize.width / 2) * scaleX;
+            const v = (py - imageSize.height / 2) * scaleY;'''
+          if old not in s:
+              raise SystemExit('pixelToFloor scale anchor not found')
+          s = s.replace(old, new, 1)
+
+          old = '''function applyPlane(mesh, settings, size, plane = "xz") {
+            const scale = num(settings.scale, DEFAULTS.scale);
+            mesh.scale.set(size.width * scale, size.height * scale, 1);'''
+          new = '''function applyPlane(mesh, settings, size, plane = "xz") {
+            const legacyScale = num(settings.scale, DEFAULTS.scale);
+            const scaleX = num(settings.scale_x, legacyScale);
+            const scaleY = num(settings.scale_y, legacyScale);
+            mesh.scale.set(size.width * scaleX, size.height * scaleY, 1);'''
+          if old not in s:
+              raise SystemExit('applyPlane scale anchor not found')
+          s = s.replace(old, new, 1)
+
+          old = '''        ${control("Escala", "scale", settings.scale, 0.001, 0.12, 0.001)}'''
+          new = '''        ${control("Escala X", "scale_x", settings.scale_x, 0.001, 0.12, 0.001)}
+                  ${control("Escala Y", "scale_y", settings.scale_y, 0.001, 0.12, 0.001)}'''
+          if old not in s:
+              raise SystemExit('UI scale control anchor not found')
+          s = s.replace(old, new, 1)
+
+          old = '      for (const key of ["x", "z", "y", "scale", "rotation", "opacity"]) {'
+          new = '      for (const key of ["x", "z", "y", "scale_x", "scale_y", "rotation", "opacity"]) {'
+          if old not in s:
+              raise SystemExit('UI scale binding anchor not found')
+          s = s.replace(old, new, 1)
+
+          path.write_text(s, encoding='utf-8')
+
+          entry = Path('custom_components/ha3d/frontend/ha3d-entry.js')
+          e = entry.read_text(encoding='utf-8')
+          old_token = 'ha3d-robot-map-overlay.js?v=robot-map-overlay-4'
+          new_token = 'ha3d-robot-map-overlay.js?v=robot-map-overlay-5'
+          if old_token not in e:
+              raise SystemExit('Map overlay cache token not found')
+          entry.write_text(e.replace(old_token, new_token, 1), encoding='utf-8')
+
+          manifest = Path('custom_components/ha3d/manifest.json')
+          data = json.loads(manifest.read_text(encoding='utf-8'))
+          if data.get('version') != '0.2.33':
+              raise SystemExit(f"Expected 0.2.33, got {data.get('version')}")
+          data['version'] = '0.2.34'
+          manifest.write_text(json.dumps(data, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+          PY
+
+      - name: Validate frontend syntax and migration markers
+        run: |
+          node --check custom_components/ha3d/frontend/ha3d-robot-map-overlay.js
+          node --check custom_components/ha3d/frontend/ha3d-entry.js
+          grep -q 'scale_x' custom_components/ha3d/frontend/ha3d-robot-map-overlay.js
+          grep -q 'scale_y' custom_components/ha3d/frontend/ha3d-robot-map-overlay.js
+          grep -q 'Escala X' custom_components/ha3d/frontend/ha3d-robot-map-overlay.js
+          grep -q 'Escala Y' custom_components/ha3d/frontend/ha3d-robot-map-overlay.js
+
+      - name: Run project validation
+        run: |
+          npm run check
+          npm test
+          python -m unittest discover -s tests -p 'test_*.py'
+
+      - name: Commit fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add custom_components/ha3d/frontend/ha3d-robot-map-overlay.js custom_components/ha3d/frontend/ha3d-entry.js custom_components/ha3d/manifest.json
+          git commit -m "Add independent Xiaomi map X and Y scale controls"
+          git push origin HEAD:main
+
+      - name: Tag v0.2.34
+        run: |
+          git tag -a v0.2.34 -m "HA3D v0.2.34"
+          git push origin v0.2.34
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v0.2.34 --title "HA3D v0.2.34" --notes "Adds independent Xiaomi map scale controls for X and Y. Existing single-scale settings migrate automatically to equal X/Y values, preserving the current alignment. Both the rendered map plane and vacuum pixel-to-floor conversion use the same independent axes, so stretching one map axis keeps the tracked robot aligned."
