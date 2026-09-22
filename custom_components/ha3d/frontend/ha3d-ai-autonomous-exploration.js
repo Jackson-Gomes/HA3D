@@ -49,6 +49,8 @@ function explorationState(panel) {
       recentEntities: [],
       raf: 0,
       cameraRaf: 0,
+      focusPulseRaf: 0,
+      focusEmphasis: null,
       lastEvaluate: 0,
       abortRequested: false,
       installedActivity: false,
@@ -302,6 +304,100 @@ function computeViews(panel, candidate, savedPos) {
   return { focusPos, focusTarget, scanPos, scanTarget };
 }
 
+
+function brightenFocusMaterial(material) {
+  if (!material?.clone) return { assigned: material, disposable: [] };
+  const clone = material.clone();
+  try { clone.color?.set?.(0xa9f7ff); } catch (_error) {}
+  if ('opacity' in clone) {
+    clone.transparent = true;
+    clone.opacity = Math.max(Number(clone.opacity) || 0, 0.52);
+  }
+  if ('depthWrite' in clone) clone.depthWrite = false;
+  if ('toneMapped' in clone) clone.toneMapped = false;
+  clone.needsUpdate = true;
+  return { assigned: clone, disposable: [clone] };
+}
+
+function stopFocusEmphasis(panel) {
+  const st = explorationState(panel);
+  if (st.focusPulseRaf) cancelAnimationFrame(st.focusPulseRaf);
+  st.focusPulseRaf = 0;
+  const focus = st.focusEmphasis;
+  if (!focus) return;
+
+  for (const entry of focus.entries || []) {
+    if (entry.object?.material === entry.assigned) entry.object.material = entry.original;
+    for (const material of entry.disposable || []) material?.dispose?.();
+  }
+
+  if (focus.helper) {
+    focus.helper.parent?.remove?.(focus.helper);
+    focus.helper.geometry?.dispose?.();
+    focus.helper.material?.dispose?.();
+  }
+  st.focusEmphasis = null;
+}
+
+function startFocusEmphasis(panel, candidate) {
+  stopFocusEmphasis(panel);
+  if (!candidate?.object || !panel?._scene || !isXrayActive(panel)) return;
+
+  const st = explorationState(panel);
+  const entries = [];
+  candidate.object.traverse?.((object) => {
+    if (!object?.isMesh || !object.material) return;
+    const original = object.material;
+    if (Array.isArray(original)) {
+      const disposable = [];
+      const assigned = original.map((material) => {
+        const result = brightenFocusMaterial(material);
+        disposable.push(...result.disposable);
+        return result.assigned;
+      });
+      object.material = assigned;
+      entries.push({ object, original, assigned, disposable });
+      return;
+    }
+    const result = brightenFocusMaterial(original);
+    object.material = result.assigned;
+    entries.push({ object, original, assigned: result.assigned, disposable: result.disposable });
+  });
+
+  let helper = null;
+  try {
+    helper = new THREE.Box3Helper(candidate.box.clone(), 0xb9fbff);
+    helper.name = '__HA3D_SCANNER_FOCUS__';
+    helper.renderOrder = 20;
+    if (helper.material) {
+      helper.material.transparent = true;
+      helper.material.opacity = 0.88;
+      helper.material.depthTest = false;
+      helper.material.depthWrite = false;
+      helper.material.toneMapped = false;
+    }
+    panel._scene.add(helper);
+  } catch (_error) {}
+
+  st.focusEmphasis = { entries, helper };
+  const pulse = (now) => {
+    if (!st.active || !isXrayActive(panel) || st.focusEmphasis?.helper !== helper) {
+      st.focusPulseRaf = 0;
+      return;
+    }
+    const wave = 0.5 + 0.5 * Math.sin(now * 0.0075);
+    if (helper?.material) helper.material.opacity = 0.62 + wave * 0.34;
+    for (const entry of entries) {
+      const materials = Array.isArray(entry.assigned) ? entry.assigned : [entry.assigned];
+      for (const material of materials) {
+        if (material && 'opacity' in material) material.opacity = 0.46 + wave * 0.18;
+      }
+    }
+    st.focusPulseRaf = requestAnimationFrame(pulse);
+  };
+  st.focusPulseRaf = requestAnimationFrame(pulse);
+}
+
 async function returnToOrbit(panel, savedPos, savedTarget, fast = false) {
   if (!panel.isConnected || !isXrayActive(panel)) return;
   await animateCamera(
@@ -328,6 +424,7 @@ async function startExploration(panel) {
   panel._ha3dAiExplorationActive = true;
   panel._ha3dAiExplorationTarget = candidate.entity;
   panel._ha3dScannerInspect?.(candidate.entity, "ACTIVE SCAN");
+  startFocusEmphasis(panel, candidate);
 
   const savedPos = panel._camera.position.clone();
   const savedTarget = panel._controls.target.clone();
@@ -353,6 +450,7 @@ async function startExploration(panel) {
   } finally {
     const fast = !completed || st.abortRequested || hasAnomalyPriority(panel);
     await returnToOrbit(panel, savedPos, savedTarget, fast);
+    stopFocusEmphasis(panel);
 
     st.active = false;
     st.abortRequested = false;
@@ -450,6 +548,7 @@ function install(panel) {
 
 function cleanup(panel) {
   const st = explorationState(panel);
+  stopFocusEmphasis(panel);
   if (st.raf) cancelAnimationFrame(st.raf);
   if (st.cameraRaf) cancelAnimationFrame(st.cameraRaf);
   st.raf = 0;
