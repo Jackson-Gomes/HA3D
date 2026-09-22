@@ -1,3 +1,5 @@
+import * as THREE from "https://esm.sh/three@0.180.0";
+
 const Panel = customElements.get("ha3d-panel");
 if (!Panel) throw new Error("HA3D panel was not registered");
 const proto = Panel.prototype;
