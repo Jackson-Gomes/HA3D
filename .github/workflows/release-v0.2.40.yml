@@ -1,0 +1,58 @@
+name: Publish HA3D v0.2.40 binding editor fixes
+
+on:
+  push:
+    paths:
+      - .github/workflows/release-v0.2.40.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify release contents
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          manifest=json.loads(Path('custom_components/ha3d/manifest.json').read_text())
+          assert manifest['version']=='0.2.40'
+          init=Path('custom_components/ha3d/__init__.py').read_text()
+          assert 'FRONTEND_VERSION = "0.2.40"' in init
+          entry=Path('custom_components/ha3d/frontend/ha3d-entry.js').read_text()
+          assert 'binding-editor-override-1' in entry
+          fix=Path('custom_components/ha3d/frontend/ha3d-binding-editor-override.js').read_text()
+          for marker in ['ha3d.__unbound__','Binding migrado para o objeto inteiro','Encontrado em uma subpeça','delete object.userData.ha3dEntityId']:
+              assert marker in fix
+          # Tombstone must remain a syntactically valid HA-style entity id so the current API accepts it.
+          import re
+          assert re.fullmatch(r'[a-z0-9_]+\.[a-z0-9_]+', 'ha3d.__unbound__')
+          PY
+      - name: Run validation
+        run: |
+          npm run check
+          npm test
+          python -m unittest discover -s tests -p 'test_*.py'
+      - name: Tag release
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a v0.2.40 -m "HA3D v0.2.40"
+          git push origin v0.2.40
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v0.2.40 --title "HA3D v0.2.40" --notes "Unifica o editor de bindings com o auto-binding do GLB. Bindings automáticos agora podem ser sobrescritos ou removidos sem renascer no refresh. O editor detecta bindings antigos salvos em subpeças do objeto selecionado, mostra a origem e migra o vínculo para o objeto lógico inteiro ao salvar. Também limpa ha3dEntityId obsoleto ao reindexar, preservando gizmo e persistência das versões anteriores."
