@@ -10,7 +10,7 @@ const NEXT_MIN_MS = 12000;
 const NEXT_MAX_MS = 20000;
 const ROBOT_NEXT_MIN_MS = 7500;
 const ROBOT_NEXT_MAX_MS = 13500;
-const ROBOT_FOCUS_CHANCE = 0.68;
+const ROBOT_FOCUS_CHANCE = 0.32;
 const MOVE_IN_MS = 1700;
 const SCAN_MS = 2100;
 const HOLD_MIN_MS = 900;
@@ -98,6 +98,18 @@ function objectBounds(object) {
   return null;
 }
 
+function trackedRobotTarget(panel, entity) {
+  if (!String(entity || "").startsWith("vacuum.")) return null;
+  const entries = panel?._robotEntries;
+  if (!(entries instanceof Map)) return null;
+  for (const entry of entries.values()) {
+    if (entry?.config?.vacuum_entity !== entity) continue;
+    const root = entry.object || entry.icon;
+    if (root?.isObject3D && root.visible !== false) return root;
+  }
+  return null;
+}
+
 function candidateObjects(panel) {
   const map = panel._objectsByEntity;
   if (!(map instanceof Map)) return [];
@@ -109,7 +121,7 @@ function candidateObjects(panel) {
   for (const [entity, rawObjects] of map.entries()) {
     if (!panel._hass?.states?.[entity]) continue;
     const objects = Array.isArray(rawObjects) ? rawObjects : (rawObjects instanceof Set ? [...rawObjects] : [rawObjects]);
-    const object = objects.find((item) => item?.isObject3D && item.visible !== false);
+    const object = trackedRobotTarget(panel, entity) || objects.find((item) => item?.isObject3D && item.visible !== false);
     if (!object || seenObjects.has(object.uuid)) continue;
 
     const box = objectBounds(object);
@@ -141,11 +153,11 @@ function chooseCandidate(panel) {
   // repeated attention, but not every pass, so the rest of the home remains alive.
   const robot = cleaningRobotEntity(panel);
   const robotCandidate = robot ? candidates.find((item) => item.entity === robot) : null;
-  if (robotCandidate && Math.random() < ROBOT_FOCUS_CHANCE) return robotCandidate;
+  if (robotCandidate && st.lastEntity !== robot && Math.random() < ROBOT_FOCUS_CHANCE) return robotCandidate;
 
   const anomalies = panel._ha3dOrganicTelemetry?.anomalies;
   if (anomalies instanceof Map && anomalies.size > 0) {
-    const anomalyCandidates = candidates.filter((item) => anomalies.has(item.entity));
+    const anomalyCandidates = candidates.filter((item) => anomalies.has(item.entity) && item.entity !== st.lastEntity);
     if (anomalyCandidates.length && Math.random() < 0.82) {
       return anomalyCandidates[Math.floor(Math.random() * anomalyCandidates.length)];
     }

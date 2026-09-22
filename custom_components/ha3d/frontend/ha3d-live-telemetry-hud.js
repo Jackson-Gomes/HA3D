@@ -89,7 +89,64 @@ function displayState(entity, state) {
   return String(state?.state ?? "—").toUpperCase();
 }
 
-function detailRows(entity, state) {
+function trackedRobotEntry(panel, entity) {
+  if (!String(entity || "").startsWith("vacuum.")) return null;
+  const entries = panel?._robotEntries;
+  if (!(entries instanceof Map)) return null;
+  for (const entry of entries.values()) {
+    if (entry?.config?.vacuum_entity === entity) return entry;
+  }
+  return null;
+}
+
+function trackedTargetObject(panel, entity) {
+  const entry = trackedRobotEntry(panel, entity);
+  const tracked = entry?.object || entry?.icon;
+  if (tracked?.isObject3D && tracked.visible !== false) return tracked;
+  const raw = panel._objectsByEntity?.get?.(entity);
+  const objects = Array.isArray(raw) ? raw : (raw instanceof Set ? [...raw] : [raw]);
+  return objects.find((item) => item?.isObject3D && item.visible !== false) || null;
+}
+
+function firstUseful(...values) {
+  return values.find((value) => value !== undefined && value !== null && value !== "") ?? null;
+}
+
+function robotPositionSource(panel, entry) {
+  const state = panel?._hass?.states?.[entry?.config?.position_entity];
+  if (!state) return {};
+  let source = { ...(state.attributes || {}) };
+  if (![source.x, source.y, source.a].some((value) => value !== undefined)) {
+    try { source = { ...source, ...JSON.parse(state.state) }; } catch (_error) {}
+  }
+  const embedded = source.vacuum_position || source.position;
+  if (embedded && typeof embedded === "object") source = { ...source, ...embedded };
+  return source;
+}
+
+function robotDetailRows(panel, entity, state) {
+  const entry = trackedRobotEntry(panel, entity);
+  if (!entry) return null;
+  const attrs = state?.attributes || {};
+  const pos = robotPositionSource(panel, entry);
+  const rows = [["STATE", displayState(entity, state)]];
+  const battery = firstUseful(attrs.battery_level, attrs.battery);
+  if (battery != null) rows.push(["BATTERY", valueWithUnit(battery, "%")]);
+  const room = firstUseful(attrs.current_room, attrs.room_name, attrs.room, attrs.segment_name, attrs.segment, pos.current_room, pos.room_name, pos.room, pos.segment_name, pos.segment);
+  if (room != null) rows.push(["ROOM", String(room)]);
+  const speed = firstUseful(attrs.current_speed, attrs.movement_speed, attrs.speed, pos.current_speed, pos.movement_speed, pos.speed);
+  if (speed != null) rows.push(["SPEED", String(speed)]);
+  const heading = firstUseful(pos.a, pos.heading, pos.angle);
+  if (heading != null) rows.push(["HEADING", `${formatScalar(scalar(heading) ?? heading)}°`]);
+  const x = scalar(pos.x), y = scalar(pos.y);
+  if (x != null && y != null) rows.push(["MAP POS", `${formatScalar(x)}, ${formatScalar(y)}`]);
+  rows.push(["UPDATED", stateAge(state)]);
+  return rows.slice(0, 7);
+}
+
+function detailRows(entity, state, panel = null) {
+  const robotRows = panel ? robotDetailRows(panel, entity, state) : null;
+  if (robotRows) return robotRows;
   const attrs = state?.attributes || {};
   const rows = [["STATE", displayState(entity, state)], ["UPDATED", stateAge(state)]];
   const candidates = [
@@ -243,7 +300,7 @@ function addEventLine(panel,text){const hud=ensureHud(panel),box=hud?.querySelec
 
 function clearCallout(panel){const st=telemetryState(panel);if(st.hideTimer)clearTimeout(st.hideTimer);st.hideTimer=0;st.calloutEntity=null;st.targetObject=null;st.typingToken+=1;const hud=ensureHud(panel);hud?.querySelector("#ha3dTelemetryCard")?.classList.remove("visible");const poly=hud?.querySelector("#ha3dTelemetryLeader polyline"),dot=hud?.querySelector("#ha3dTelemetryLeader circle");if(poly)poly.setAttribute("points","");if(dot){dot.setAttribute("cx","-20");dot.setAttribute("cy","-20");}if(st.indicator)st.indicator.visible=false;}
 
-async function showCallout(panel,entity,reason=null){if(!isXrayActive(panel))return;const state=panel._hass?.states?.[entity],object=panel._objectsByEntity?.get?.(entity)?.[0];if(!state||!object)return;const st=telemetryState(panel);if(st.hideTimer)clearTimeout(st.hideTimer);st.typingToken+=1;const token=st.typingToken;st.calloutEntity=entity;st.targetObject=object;targetWorldIndicator(panel,object);const hud=ensureHud(panel),card=hud?.querySelector("#ha3dTelemetryCard");if(!card)return;card.innerHTML="";const computedReason=reason||reasonFor(entity,state);card.classList.toggle("attention",computedReason!=="LIVE NODE"&&computedReason!=="STATE CHANGE");const kicker=document.createElement("div"),name=document.createElement("div"),entityLine=document.createElement("div");kicker.className="kicker";name.className="name";entityLine.className="entity";card.append(kicker,name,entityLine);const rows=[];for(const [label,value] of detailRows(entity,state)){const row=document.createElement("div"),a=document.createElement("span"),b=document.createElement("span");row.className="row";row.append(a,b);card.appendChild(row);rows.push([a,b,label,String(value)]);}const spark=sparklineSvg(st.samples.get(entity));if(spark)card.appendChild(spark);card.classList.add("visible");const domain=String(entity).split(".")[0].toUpperCase(),friendly=String(state.attributes?.friendly_name||entity).toUpperCase();await typeText(kicker,`${computedReason} // ${domain}`,token,st,12);await typeText(name,friendly,token,st,14);await typeText(entityLine,entity,token,st,8);for(const [a,b,label,value] of rows){if(st.typingToken!==token)return;a.textContent=label;await typeText(b,value,token,st,9);}st.hideTimer=setTimeout(()=>{if(st.calloutEntity===entity)clearCallout(panel);},CALLOUT_LIFETIME_MS);}
+async function showCallout(panel,entity,reason=null){if(!isXrayActive(panel))return;const state=panel._hass?.states?.[entity],object=trackedTargetObject(panel,entity);if(!state||!object)return;const st=telemetryState(panel);if(st.hideTimer)clearTimeout(st.hideTimer);st.typingToken+=1;const token=st.typingToken;st.calloutEntity=entity;st.targetObject=object;targetWorldIndicator(panel,object);const hud=ensureHud(panel),card=hud?.querySelector("#ha3dTelemetryCard");if(!card)return;card.innerHTML="";const computedReason=reason||reasonFor(entity,state);card.classList.toggle("attention",computedReason!=="LIVE NODE"&&computedReason!=="STATE CHANGE");const kicker=document.createElement("div"),name=document.createElement("div"),entityLine=document.createElement("div");kicker.className="kicker";name.className="name";entityLine.className="entity";card.append(kicker,name,entityLine);const rows=[];for(const [label,value] of detailRows(entity,state,panel)){const row=document.createElement("div"),a=document.createElement("span"),b=document.createElement("span");row.className="row";row.append(a,b);card.appendChild(row);rows.push([a,b,label,String(value)]);}const spark=sparklineSvg(st.samples.get(entity));if(spark)card.appendChild(spark);card.classList.add("visible");const domain=String(entity).split(".")[0].toUpperCase(),friendly=String(state.attributes?.friendly_name||entity).toUpperCase();await typeText(kicker,`${computedReason} // ${domain}`,token,st,12);await typeText(name,friendly,token,st,14);await typeText(entityLine,entity,token,st,8);for(const [a,b,label,value] of rows){if(st.typingToken!==token)return;a.textContent=label;await typeText(b,value,token,st,9);}st.hideTimer=setTimeout(()=>{if(st.calloutEntity===entity)clearCallout(panel);},CALLOUT_LIFETIME_MS);}
 
 function eligibleEntities(panel){const states=panel._hass?.states||{};return Array.from(panel._objectsByEntity?.keys?.()||[]).filter((entity)=>states[entity]);}
 function passiveInspect(panel){if(!isXrayActive(panel)||panel._ha3dAiExplorationActive)return;const st=telemetryState(panel),entities=eligibleEntities(panel);if(!entities.length)return;const entity=entities[st.cursor%entities.length];st.cursor+=1;showCallout(panel,entity,reasonFor(entity,panel._hass.states[entity]));}
