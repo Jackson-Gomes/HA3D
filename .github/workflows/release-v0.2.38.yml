@@ -1,0 +1,55 @@
+name: Publish HA3D v0.2.38 editor fixes
+
+on:
+  push:
+    paths:
+      - .github/workflows/release-v0.2.38.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify release contents
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          manifest=json.loads(Path('custom_components/ha3d/manifest.json').read_text())
+          assert manifest['version']=='0.2.38'
+          init=Path('custom_components/ha3d/__init__.py').read_text()
+          assert 'FRONTEND_VERSION = "0.2.38"' in init
+          entry=Path('custom_components/ha3d/frontend/ha3d-entry.js').read_text()
+          assert 'editor-gizmo-persistence-1' in entry
+          fix=Path('custom_components/ha3d/frontend/ha3d-editor-gizmo-persistence-fix.js').read_text()
+          for marker in ['GIZMO_SIZE = 1.45','rotation: [object.rotation.x, object.rotation.y, object.rotation.z]','_ha3dSuppressModelPickUntil']:
+              assert marker in fix
+          PY
+      - name: Run validation
+        run: |
+          npm run check
+          npm test
+          python -m unittest discover -s tests -p 'test_*.py'
+      - name: Tag release
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a v0.2.38 -m "HA3D v0.2.38"
+          git push origin v0.2.38
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v0.2.38 --title "HA3D v0.2.38" --notes "Corrige dois pontos do editor 3D: o gizmo de transformação agora é maior e protegido contra o click residual que selecionava a geometria atrás dele; e as transformações passam a persistir corretamente no Home Assistant usando rotação Euler com exatamente três valores numéricos. Inclui confirmação de persistência e cache bust do frontend."
