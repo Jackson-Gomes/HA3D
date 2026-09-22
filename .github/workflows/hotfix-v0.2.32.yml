@@ -1,0 +1,162 @@
+name: Publish HA3D v0.2.32 Scanner arbitration fix
+
+on:
+  push:
+    paths:
+      - .github/workflows/hotfix-v0.2.32.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  hotfix-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fix Scanner arbitration and candidates
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          ai = Path('custom_components/ha3d/frontend/ha3d-ai-autonomous-exploration.js')
+          a = ai.read_text(encoding='utf-8')
+
+          old_priority = '''function hasAnomalyPriority(panel) {
+            const anomalies = panel._ha3dOrganicTelemetry?.anomalies;
+            if (anomalies instanceof Map && anomalies.size > 0) return true;
+            const inspection = panel._ha3dAiInspectionFocus;
+            return Boolean(inspection?.active || inspection?.pendingEntity || panel._ha3dAiFocusActive);
+          }'''
+          new_priority = '''function hasAnomalyPriority(panel) {
+            const inspection = panel._ha3dAiInspectionFocus;
+            return Boolean(inspection?.active || panel._ha3dAiFocusActive);
+          }'''
+          if old_priority not in a:
+              raise SystemExit('Anomaly priority block not found')
+          a = a.replace(old_priority, new_priority, 1)
+
+          old_objects = '    const objects = Array.isArray(rawObjects) ? rawObjects : [rawObjects];'
+          new_objects = '    const objects = Array.isArray(rawObjects) ? rawObjects : (rawObjects instanceof Set ? [...rawObjects] : [rawObjects]);'
+          if old_objects not in a:
+              raise SystemExit('Candidate object normalization point not found')
+          a = a.replace(old_objects, new_objects, 1)
+
+          old_size_filter = '    if (maxSize > scale * 0.62) continue;\n'
+          if old_size_filter not in a:
+              raise SystemExit('Candidate size filter not found')
+          a = a.replace(old_size_filter, '', 1)
+
+          robot_block = '''  const robot = cleaningRobotEntity(panel);
+          const robotCandidate = robot ? candidates.find((item) => item.entity === robot) : null;
+          if (robotCandidate && Math.random() < ROBOT_FOCUS_CHANCE) return robotCandidate;
+
+          const recent = new Set(st.recentEntities);'''
+          anomaly_block = '''  const robot = cleaningRobotEntity(panel);
+          const robotCandidate = robot ? candidates.find((item) => item.entity === robot) : null;
+          if (robotCandidate && Math.random() < ROBOT_FOCUS_CHANCE) return robotCandidate;
+
+          const anomalies = panel._ha3dOrganicTelemetry?.anomalies;
+          if (anomalies instanceof Map && anomalies.size > 0) {
+            const anomalyCandidates = candidates.filter((item) => anomalies.has(item.entity));
+            if (anomalyCandidates.length && Math.random() < 0.82) {
+              return anomalyCandidates[Math.floor(Math.random() * anomalyCandidates.length)];
+            }
+          }
+
+          const recent = new Set(st.recentEntities);'''
+          if robot_block not in a:
+              raise SystemExit('Robot candidate block not found')
+          a = a.replace(robot_block, anomaly_block, 1)
+          ai.write_text(a, encoding='utf-8')
+
+          focus = Path('custom_components/ha3d/frontend/ha3d-ai-inspection-focus.js')
+          f = focus.read_text(encoding='utf-8')
+
+          old_start = '''async function startFocus(panel, entity) {
+            const st = focusState(panel);'''
+          new_start = '''async function startFocus(panel, entity) {
+            const st = focusState(panel);
+            if (panel._ha3dAiExplorationActive) return false;'''
+          if old_start not in f:
+              raise SystemExit('Inspection focus start point not found')
+          f = f.replace(old_start, new_start, 1)
+
+          old_eval = '''  if (!isXrayActive(panel)) {
+            st.pendingEntity = null;
+            st.dueAt = 0;
+            return;
+          }
+
+          refreshCandidates(panel);'''
+          new_eval = '''  if (!isXrayActive(panel)) {
+            st.pendingEntity = null;
+            st.dueAt = 0;
+            return;
+          }
+
+          if (panel._ha3dAiExplorationActive) {
+            if (st.pendingEntity) st.dueAt = Date.now() + 1800;
+            return;
+          }
+
+          refreshCandidates(panel);'''
+          if old_eval not in f:
+              raise SystemExit('Inspection focus evaluate point not found')
+          f = f.replace(old_eval, new_eval, 1)
+          focus.write_text(f, encoding='utf-8')
+
+          entry = Path('custom_components/ha3d/frontend/ha3d-entry.js')
+          e = entry.read_text(encoding='utf-8')
+          pairs = [
+              ('ha3d-ai-autonomous-exploration.js?v=ai-autonomous-exploration-5', 'ha3d-ai-autonomous-exploration.js?v=ai-autonomous-exploration-6'),
+              ('ha3d-ai-inspection-focus.js?v=ai-inspection-focus-1', 'ha3d-ai-inspection-focus.js?v=ai-inspection-focus-2'),
+          ]
+          for old, new in pairs:
+              if old not in e:
+                  raise SystemExit(f'Entry token not found: {old}')
+              e = e.replace(old, new, 1)
+          entry.write_text(e, encoding='utf-8')
+
+          manifest = Path('custom_components/ha3d/manifest.json')
+          data = json.loads(manifest.read_text(encoding='utf-8'))
+          if data.get('version') != '0.2.31':
+              raise SystemExit(f"Expected 0.2.31, got {data.get('version')}")
+          data['version'] = '0.2.32'
+          manifest.write_text(json.dumps(data, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+          PY
+
+      - name: Validate frontend syntax
+        run: |
+          node --check custom_components/ha3d/frontend/ha3d-ai-autonomous-exploration.js
+          node --check custom_components/ha3d/frontend/ha3d-ai-inspection-focus.js
+          node --check custom_components/ha3d/frontend/ha3d-entry.js
+
+      - name: Run project validation
+        run: |
+          npm run check
+          npm test
+          python -m unittest discover -s tests -p 'test_*.py'
+
+      - name: Commit fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add custom_components/ha3d/frontend/ha3d-ai-autonomous-exploration.js custom_components/ha3d/frontend/ha3d-ai-inspection-focus.js custom_components/ha3d/frontend/ha3d-entry.js custom_components/ha3d/manifest.json
+          git commit -m "Fix Scanner arbitration and anomaly targeting"
+          git push origin HEAD:main
+
+      - name: Tag v0.2.32
+        run: |
+          git tag -a v0.2.32 -m "HA3D v0.2.32"
+          git push origin v0.2.32
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v0.2.32 --title "HA3D v0.2.32" --notes "Fixes the remaining Scanner camera blocker. Persistent telemetry anomalies no longer freeze autonomous Scanner exploration; instead, anomalous entities become high-priority scan targets. The legacy anomaly-focus camera now yields while Scanner exploration is active. Candidate discovery is also more permissive so valid bound objects are not discarded solely because of their relative size. Keeps synchronized HUD, target highlight, robot priority, and X-Ray/Cinematic behavior from v0.2.31."
