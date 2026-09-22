@@ -9,7 +9,7 @@ function isXrayActive(panel) {
   return Boolean(panel?.shadowRoot?.querySelector("#root")?.classList.contains("ha3d-idle-xray"));
 }
 
-function makeSilhouetteMaterial(color, baseOpacity = 0.035, rimOpacity = 0.92) {
+function makeSilhouetteMaterial(color, baseOpacity = 0.008, rimOpacity = 0.72) {
   return new THREE.ShaderMaterial({
     uniforms: {
       uColor: { value: new THREE.Color(color) },
@@ -35,10 +35,10 @@ function makeSilhouetteMaterial(color, baseOpacity = 0.035, rimOpacity = 0.92) {
       void main() {
         float facing = abs(dot(normalize(vNormalView), normalize(vViewDir)));
         float rim = 1.0 - clamp(facing, 0.0, 1.0);
-        rim = smoothstep(0.18, 0.82, rim);
-        rim = pow(rim, 1.35);
+        rim = smoothstep(0.72, 0.97, rim);
+        rim = pow(rim, 2.2);
         float alpha = mix(uBaseOpacity, uRimOpacity, rim);
-        if (alpha < 0.02) discard;
+        if (alpha < 0.01) discard;
         gl_FragColor = vec4(uColor, alpha);
       }
     `,
@@ -52,10 +52,10 @@ function makeSilhouetteMaterial(color, baseOpacity = 0.035, rimOpacity = 0.92) {
 
 function ensureMaterials(panel) {
   if (!panel._ha3dXraySilhouetteMaterial) {
-    panel._ha3dXraySilhouetteMaterial = makeSilhouetteMaterial(0x4de7ff, 0.035, 0.94);
+    panel._ha3dXraySilhouetteMaterial = makeSilhouetteMaterial(0x4de7ff, 0.008, 0.72);
   }
   if (!panel._ha3dXraySilhouetteOpenMaterial) {
-    panel._ha3dXraySilhouetteOpenMaterial = makeSilhouetteMaterial(0xff596b, 0.05, 0.99);
+    panel._ha3dXraySilhouetteOpenMaterial = makeSilhouetteMaterial(0xff596b, 0.015, 0.88);
   }
 }
 
