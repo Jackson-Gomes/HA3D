@@ -36,6 +36,7 @@ import "./ha3d-editor-gizmo-persistence-fix.js?v=editor-gizmo-persistence-2";
 import "./ha3d-binding-editor-override.js?v=binding-editor-override-1";
 import "./ha3d-virtual-lights.js?v=virtual-lights-1";
 import "./ha3d-virtual-lights-api-adapter.js?v=virtual-lights-api-1";
+import "./ha3d-virtual-light-markers.js?v=virtual-light-markers-1";
 import "./ha3d-robot-trackers.js?v=robot-trackers-9";
 import "./ha3d-robot-map-overlay.js?v=robot-map-overlay-5";
 import "./ha3d-robot-map-hotfix.js?v=robot-map-hotfix-1";
