@@ -1,0 +1,18 @@
+name: Publish HA3D v0.2.16
+
+on:
+  push:
+    paths:
+      - '.github/workflows/release-v0.2.16.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish v0.2.16
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release view v0.2.16 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create v0.2.16 --repo "$GITHUB_REPOSITORY" --target "9ecaada05ed44acebe6148e8a63862dbc6390c1d" --title "HA3D v0.2.16" --notes "Experimental lightweight X-Ray silhouette mode. Replaces visible internal edge clutter with a view-dependent rim shader while preserving open door/window alert coloring. Rollback branch: pre-xray-silhouette-0.2.15."
