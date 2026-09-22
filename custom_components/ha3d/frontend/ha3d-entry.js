@@ -45,3 +45,4 @@ import "./ha3d-robot-trackers.js?v=robot-trackers-9";
 import "./ha3d-robot-map-overlay.js?v=robot-map-overlay-5";
 import "./ha3d-robot-map-hotfix.js?v=robot-map-hotfix-1";
 import "./ha3d-robot-map-shared-config.js?v=robot-map-shared-config-1";
+import "./ha3d-floating-widgets.js?v=floating-widgets-1";
