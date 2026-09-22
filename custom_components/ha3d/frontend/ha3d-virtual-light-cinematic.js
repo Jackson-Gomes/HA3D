@@ -17,19 +17,23 @@ function virtualConfigs(panel) {
   return Array.isArray(panel?._config?.virtual_lights) ? panel._config.virtual_lights : [];
 }
 
-function virtualIdsForEntity(panel, entity) {
+function visibleVirtualIdsForEntity(panel, entity) {
   return virtualConfigs(panel)
-    .filter((item) => item?.entity_id === entity && item?.id)
+    .filter((item) => item?.entity_id === entity && item?.id && item.show_marker !== false)
     .map((item) => item.id);
 }
 
-function ensureLocalState(panel) {
-  panel._ha3dVirtualCinematicLocalState ||= new Map();
-  return panel._ha3dVirtualCinematicLocalState;
+function binaryStateFor(panel, config) {
+  if (config?.entity_id) {
+    const state = panel?._hass?.states?.[config.entity_id]?.state;
+    return state === "on" || state === "off" ? state : null;
+  }
+  return config?.enabled === false ? "off" : "on";
 }
 
-function localVirtualState(config) {
-  return config?.enabled === false ? "off" : "on";
+function ensureStateCache(panel) {
+  panel._ha3dVirtualCinematicState ||= new Map();
+  return panel._ha3dVirtualCinematicState;
 }
 
 function installSyntheticBindings(panel, entities) {
@@ -78,64 +82,80 @@ function updateVirtualMarkerFocus(panel, entities) {
 }
 
 function restoreVirtualMarkers(panel) {
-  for (const marker of panel?._ha3dVirtualLightMarkers?.values?.() || []) {
-    marker.style.display = "";
+  const configById = new Map(virtualConfigs(panel).map((item) => [item.id, item]));
+  for (const [id, marker] of panel?._ha3dVirtualLightMarkers?.entries?.() || []) {
+    marker.style.display = configById.get(id)?.show_marker === false ? "none" : "";
   }
 }
 
-if (!proto.__ha3dVirtualLightCinematicV1) {
-  proto.__ha3dVirtualLightCinematicV1 = true;
+if (!proto.__ha3dVirtualLightCinematicV2) {
+  proto.__ha3dVirtualLightCinematicV2 = true;
 
-  // When an HA entity owns one or more runtime-created lights, cinematic focus
-  // should target those lights instead of the old GLB/entity anchor.
+  // A normal HA entity can own several virtual lights. Cinematic focus uses
+  // only the virtual lights whose marker is enabled; one marker means one exact
+  // focus point, several markers are framed together, no markers means no
+  // virtual-light cinematic focus for that entity.
   const oldQueue = proto._queueCinematicFocus;
   proto._queueCinematicFocus = function (entity, ...args) {
     if (!idFromToken(entity)) {
-      const ids = virtualIdsForEntity(this, entity);
-      if (ids.length) {
+      const virtualIds = visibleVirtualIdsForEntity(this, entity);
+      if (virtualIds.length) {
         let result;
-        for (const id of ids) result = oldQueue?.call(this, tokenFor(id), ...args);
+        for (const id of virtualIds) result = oldQueue?.call(this, tokenFor(id), ...args);
         return result;
       }
+
+      const ownsVirtualLights = virtualConfigs(this).some((item) => item?.entity_id === entity);
+      if (ownsVirtualLights) return;
     }
     return oldQueue?.call(this, entity, ...args);
   };
 
-  // Unbound virtual lights can still be toggled locally from their marker. They
-  // have no HA entity to trigger the original cinematic state detector, so keep
-  // a tiny state cache for those lights only.
+  // The original cinematic detector only watches _lightBindings. Virtual lights
+  // are intentionally outside that map, so detect their binary state changes
+  // here. If a classic binding also exists for the same entity, the original
+  // detector already queues it and our queue wrapper redirects it to the chosen
+  // virtual marker(s), avoiding a duplicate event.
   const oldSync = proto._syncLightStates;
   proto._syncLightStates = function (...args) {
-    const stateCache = ensureLocalState(this);
-    const changed = [];
+    const cache = ensureStateCache(this);
+    const changedEntities = new Set();
+    const changedLocalTokens = [];
     const activeIds = new Set();
 
     for (const config of virtualConfigs(this)) {
-      if (!config?.id || config.entity_id) continue;
+      if (!config?.id) continue;
       activeIds.add(config.id);
-      const next = localVirtualState(config);
-      const previous = stateCache.get(config.id);
+      const next = binaryStateFor(this, config);
+      const previous = cache.get(config.id);
       if (
         this._cinematicEnabled &&
+        config.show_marker !== false &&
         (previous === "on" || previous === "off") &&
+        (next === "on" || next === "off") &&
         previous !== next
       ) {
-        changed.push(tokenFor(config.id));
+        if (config.entity_id) changedEntities.add(config.entity_id);
+        else changedLocalTokens.push(tokenFor(config.id));
       }
-      stateCache.set(config.id, next);
+      cache.set(config.id, next);
     }
 
-    for (const id of [...stateCache.keys()]) {
-      if (!activeIds.has(id)) stateCache.delete(id);
+    for (const id of [...cache.keys()]) {
+      if (!activeIds.has(id)) cache.delete(id);
     }
 
     const result = oldSync?.apply(this, args);
-    for (const token of changed) this._queueCinematicFocus?.(token);
+
+    for (const entity of changedEntities) {
+      if (!this._lightBindings?.has?.(entity)) this._queueCinematicFocus?.(entity);
+    }
+    for (const token of changedLocalTokens) this._queueCinematicFocus?.(token);
     return result;
   };
 
-  // Reuse the proven cinematic camera path by exposing virtual light handles as
-  // temporary bindings only while _runCinematicFocus resolves its anchors.
+  // Reuse the proven camera animation without altering its implementation:
+  // expose virtual-light handles as temporary bindings only during focus setup.
   const oldRun = proto._runCinematicFocus;
   proto._runCinematicFocus = function (entities, ...args) {
     const list = Array.isArray(entities) ? entities : [];
