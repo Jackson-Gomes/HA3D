@@ -45,6 +45,8 @@ def _is_valid_virtual_light(value: Any) -> bool:
         "penumbra",
         "cast_shadow",
         "enabled",
+        "show_marker",
+        "effect",
     }
     if set(value) - allowed:
         return False
@@ -85,6 +87,10 @@ def _is_valid_virtual_light(value: Any) -> bool:
     if "cast_shadow" in value and not isinstance(value["cast_shadow"], bool):
         return False
     if "enabled" in value and not isinstance(value["enabled"], bool):
+        return False
+    if "show_marker" in value and not isinstance(value["show_marker"], bool):
+        return False
+    if value.get("effect", "none") not in {"none", "tv_flicker"}:
         return False
 
     return True
