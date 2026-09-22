@@ -50,34 +50,45 @@ function installToggleGuard(panel) {
   if (!toggle || toggle.__ha3dCinematicOffV2) return;
   toggle.__ha3dCinematicOffV2 = true;
 
-  const applyToggle = (event = null) => {
-    const enabled = Boolean(toggle.checked);
-    panel._cinematicEnabled = enabled;
-    localStorage.setItem(CINEMATIC_KEY, enabled ? "1" : "0");
-    if (testButton) testButton.disabled = !enabled;
+  // Startup is read-only: persisted preference is the source of truth.
+// Never write the checkbox's transient initial state back to storage here,
+// because the control can exist for a frame before its checked state is synced.
+const stored = localStorage.getItem(CINEMATIC_KEY);
+const initialEnabled = stored === "0"
+  ? false
+  : stored === "1"
+    ? true
+    : (typeof panel._cinematicEnabled === "boolean" ? panel._cinematicEnabled : true);
+panel._cinematicEnabled = initialEnabled;
+toggle.checked = initialEnabled;
+if (testButton) testButton.disabled = !initialEnabled;
 
-    if (!enabled) cancelCinematic(panel);
+const persistToggle = (event) => {
+  const enabled = Boolean(toggle.checked);
+  panel._cinematicEnabled = enabled;
+  localStorage.setItem(CINEMATIC_KEY, enabled ? "1" : "0");
+  if (testButton) testButton.disabled = !enabled;
 
-    // Own the toggle event so the older guard cannot cancel unrelated camera
-    // animations or force the default view after Cinematic is turned off.
-    if (event) event.stopImmediatePropagation();
-  };
+  if (!enabled) cancelCinematic(panel);
 
-  toggle.addEventListener("change", applyToggle, true);
+  // Own the toggle event so the older guard cannot cancel unrelated camera
+  // animations or force the default view after Cinematic is turned off.
+  event.stopImmediatePropagation();
+};
 
-  if (testButton) {
-    testButton.addEventListener(
-      "click",
-      (event) => {
-        if (panel._cinematicEnabled) return;
-        event.preventDefault();
-        event.stopImmediatePropagation();
-      },
-      true,
-    );
-  }
+toggle.addEventListener("change", persistToggle, true);
 
-  applyToggle();
+if (testButton) {
+  testButton.addEventListener(
+    "click",
+    (event) => {
+      if (panel._cinematicEnabled) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    },
+    true,
+  );
+}
 }
 
 if (!proto.__ha3dCinematicOffV2) {
