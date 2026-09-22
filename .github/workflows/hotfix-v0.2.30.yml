@@ -1,0 +1,110 @@
+name: Publish HA3D v0.2.30 Scanner camera orchestration
+
+on:
+  push:
+    paths:
+      - .github/workflows/hotfix-v0.2.30.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  hotfix-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Synchronize Scanner camera and telemetry
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          ai = Path('custom_components/ha3d/frontend/ha3d-ai-autonomous-exploration.js')
+          a = ai.read_text(encoding='utf-8')
+          replacements = [
+              ('const FIRST_MIN_MS = 9000;', 'const FIRST_MIN_MS = 2500;'),
+              ('const FIRST_MAX_MS = 15000;', 'const FIRST_MAX_MS = 4500;'),
+              ('const NEXT_MIN_MS = 18000;', 'const NEXT_MIN_MS = 12000;'),
+              ('const NEXT_MAX_MS = 32000;', 'const NEXT_MAX_MS = 20000;'),
+              ('if (st.active || !isXrayActive(panel) || hasAnomalyPriority(panel) || (calloutBusy(panel) && !cleaningRobotEntity(panel))) return false;',
+               'if (st.active || !isXrayActive(panel) || hasAnomalyPriority(panel)) return false;'),
+              ('    hasAnomalyPriority(panel) ||\n    (calloutBusy(panel) && !cleaningRobotEntity(panel)) ||\n    performance.now() - st.lastUserActivity < USER_QUIET_MS',
+               '    hasAnomalyPriority(panel) ||\n    performance.now() - st.lastUserActivity < USER_QUIET_MS'),
+          ]
+          for old, new in replacements:
+              if old not in a:
+                  raise SystemExit(f'AI pattern not found: {old[:80]}')
+              a = a.replace(old, new, 1)
+
+          target = '  panel._ha3dAiExplorationTarget = candidate.entity;\n\n  const savedPos = panel._camera.position.clone();'
+          replacement = '  panel._ha3dAiExplorationTarget = candidate.entity;\n  panel._ha3dScannerInspect?.(candidate.entity, "ACTIVE SCAN");\n\n  const savedPos = panel._camera.position.clone();'
+          if target not in a:
+              raise SystemExit('Could not wire Scanner telemetry to camera target')
+          a = a.replace(target, replacement, 1)
+          ai.write_text(a, encoding='utf-8')
+
+          hud = Path('custom_components/ha3d/frontend/ha3d-live-telemetry-hud.js')
+          h = hud.read_text(encoding='utf-8')
+          old_passive = 'function passiveInspect(panel){if(!isXrayActive(panel))return;'
+          new_passive = 'function passiveInspect(panel){if(!isXrayActive(panel)||panel._ha3dAiExplorationActive)return;'
+          if old_passive not in h:
+              raise SystemExit('Could not guard passive Scanner inspection')
+          h = h.replace(old_passive, new_passive, 1)
+
+          old_install = 'function install(panel){if(!panel?.shadowRoot)return;panel._ha3dScannerSync=()=>syncMode(panel);ensureHud(panel);ensureWorldIndicator(panel);'
+          new_install = 'function install(panel){if(!panel?.shadowRoot)return;panel._ha3dScannerSync=()=>syncMode(panel);panel._ha3dScannerInspect=(entity,reason="ACTIVE SCAN")=>showCallout(panel,entity,reason);ensureHud(panel);ensureWorldIndicator(panel);'
+          if old_install not in h:
+              raise SystemExit('Could not expose Scanner inspection hook')
+          h = h.replace(old_install, new_install, 1)
+          hud.write_text(h, encoding='utf-8')
+
+          entry = Path('custom_components/ha3d/frontend/ha3d-entry.js')
+          e = entry.read_text(encoding='utf-8')
+          pairs = [
+              ('ha3d-live-telemetry-hud.js?v=live-telemetry-2', 'ha3d-live-telemetry-hud.js?v=live-telemetry-3'),
+              ('ha3d-ai-autonomous-exploration.js?v=ai-autonomous-exploration-3', 'ha3d-ai-autonomous-exploration.js?v=ai-autonomous-exploration-4'),
+          ]
+          for old, new in pairs:
+              if old not in e:
+                  raise SystemExit(f'Entry token not found: {old}')
+              e = e.replace(old, new, 1)
+          entry.write_text(e, encoding='utf-8')
+
+          manifest = Path('custom_components/ha3d/manifest.json')
+          data = json.loads(manifest.read_text(encoding='utf-8'))
+          if data.get('version') != '0.2.29':
+              raise SystemExit(f"Expected 0.2.29, got {data.get('version')}")
+          data['version'] = '0.2.30'
+          manifest.write_text(json.dumps(data, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+          PY
+
+      - name: Validate frontend syntax
+        run: |
+          node --check custom_components/ha3d/frontend/ha3d-ai-autonomous-exploration.js
+          node --check custom_components/ha3d/frontend/ha3d-live-telemetry-hud.js
+          node --check custom_components/ha3d/frontend/ha3d-entry.js
+
+      - name: Commit fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add custom_components/ha3d/frontend/ha3d-ai-autonomous-exploration.js custom_components/ha3d/frontend/ha3d-live-telemetry-hud.js custom_components/ha3d/frontend/ha3d-entry.js custom_components/ha3d/manifest.json
+          git commit -m "Synchronize X-Ray Scanner camera inspections"
+          git push origin HEAD:main
+
+      - name: Tag v0.2.30
+        run: |
+          git tag -a v0.2.30 -m "HA3D v0.2.30"
+          git push origin v0.2.30
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v0.2.30 \
+            --title "HA3D v0.2.30" \
+            --notes "Fixes the X-Ray Scanner camera inspection loop. The Scanner now starts its first camera inspection about 2.5–4.5 seconds after X-Ray entry, telemetry callouts no longer block camera movement, and the HUD is synchronized to the same entity the camera is inspecting. Passive Scanner callouts pause during camera inspection. Active-vacuum prioritization remains enabled."
