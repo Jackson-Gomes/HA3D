@@ -2,7 +2,7 @@ const Panel = customElements.get("ha3d-panel");
 if (!Panel) throw new Error("HA3D panel was not registered");
 
 const proto = Panel.prototype;
-const UNBOUND = "__ha3d_unbound__";
+const UNBOUND = "ha3d.__unbound__";
 
 function hasOwn(object, key) {
   return Object.prototype.hasOwnProperty.call(object || {}, key);
@@ -97,8 +97,7 @@ function installBindingSourceUi(panel) {
   const active = candidates[0] || null;
   panel._ha3dEditorBindingContext = { rootKey, candidates, active };
 
-  const previous = body.querySelector("#ha3dBindingSourceInfo");
-  previous?.remove();
+  body.querySelector("#ha3dBindingSourceInfo")?.remove();
 
   const box = document.createElement("div");
   box.id = "ha3dBindingSourceInfo";
@@ -208,9 +207,7 @@ if (!proto.__ha3dBindingEditorOverrideV1) {
         }
       }
 
-      if (!entityId && !blocked && autoBind) {
-        entityId = names.find((name) => states[name]) || null;
-      }
+      if (!entityId && !blocked && autoBind) entityId = names.find((name) => states[name]) || null;
       if (!entityId || !states[entityId]) return;
 
       object.userData ||= {};
@@ -234,7 +231,6 @@ if (!proto.__ha3dBindingEditorOverrideV1) {
       node = node.parent;
     }
 
-    // Explicit light mappings win, even when an ancestor has auto-binding disabled.
     for (const item of hierarchy) {
       for (const name of namesForObject(item)) {
         const mapped = explicit[name];
@@ -244,7 +240,6 @@ if (!proto.__ha3dBindingEditorOverrideV1) {
       }
     }
 
-    // A tombstone on the object or one of its ancestors suppresses exact auto-binding.
     for (const item of hierarchy) {
       for (const name of namesForObject(item)) {
         if (explicit[name] === UNBOUND) return null;
@@ -300,7 +295,6 @@ if (!proto.__ha3dBindingEditorOverrideV1) {
     if (sourceKey && sourceKey !== rootKey) {
       delete advanced[sourceKey];
       delete areas[sourceKey];
-      // Prevent the old child node from immediately recreating its automatic binding.
       bindings[sourceKey] = UNBOUND;
     }
 
@@ -325,7 +319,7 @@ if (!proto.__ha3dBindingEditorOverrideV1) {
     if (!rootKey) return;
     const context = this._ha3dEditorBindingContext || { rootKey, candidates: [], active: null };
     const active = context.active;
-    const activeEntity = active?.entity || this._hass?.states?.[rootKey] ? active?.entity || rootKey : null;
+    const activeEntity = active?.entity || (this._hass?.states?.[rootKey] ? rootKey : null);
     const advanced = { ...(this._config?.advanced_bindings || {}) };
     const areas = { ...(this._config?.area_bindings || {}) };
     const bindings = { ...(this._config?.bindings || {}) };
