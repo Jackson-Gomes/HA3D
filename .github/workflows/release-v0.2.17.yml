@@ -1,0 +1,19 @@
+name: Publish HA3D v0.2.17
+
+on:
+  push:
+    paths:
+      - '.github/workflows/release-v0.2.17.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish v0.2.17
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view v0.2.17 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create v0.2.17 --repo "$GITHUB_REPOSITORY" --target "8c1065e9a9c5d68313e38169f7853a48a5f658f4" --title "HA3D v0.2.17" --notes "Tune X-Ray silhouette transparency: faces are nearly transparent and rim highlighting only appears at much steeper viewing angles, reducing wall fill while preserving the external silhouette. Rollback branch: pre-xray-transparency-0.2.16."
