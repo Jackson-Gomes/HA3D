@@ -155,6 +155,7 @@ function refreshCandidates(panel) {
 
 async function startFocus(panel, entity) {
   const st = focusState(panel);
+  if (panel._ha3dAiExplorationActive) return false;
   const object = panel._objectsByEntity?.get?.(entity)?.[0];
   const organic = panel._ha3dOrganicTelemetry;
   if (!object || !(organic?.anomalies instanceof Map) || !organic.anomalies.has(entity)) return false;
@@ -226,6 +227,11 @@ function evaluate(panel) {
   if (!isXrayActive(panel)) {
     st.pendingEntity = null;
     st.dueAt = 0;
+    return;
+  }
+
+  if (panel._ha3dAiExplorationActive) {
+    if (st.pendingEntity) st.dueAt = Date.now() + 1800;
     return;
   }
 

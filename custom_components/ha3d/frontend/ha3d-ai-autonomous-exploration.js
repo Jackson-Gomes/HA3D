@@ -60,10 +60,8 @@ function explorationState(panel) {
 }
 
 function hasAnomalyPriority(panel) {
-  const anomalies = panel._ha3dOrganicTelemetry?.anomalies;
-  if (anomalies instanceof Map && anomalies.size > 0) return true;
   const inspection = panel._ha3dAiInspectionFocus;
-  return Boolean(inspection?.active || inspection?.pendingEntity || panel._ha3dAiFocusActive);
+  return Boolean(inspection?.active || panel._ha3dAiFocusActive);
 }
 
 function calloutBusy(panel) {
@@ -110,7 +108,7 @@ function candidateObjects(panel) {
 
   for (const [entity, rawObjects] of map.entries()) {
     if (!panel._hass?.states?.[entity]) continue;
-    const objects = Array.isArray(rawObjects) ? rawObjects : [rawObjects];
+    const objects = Array.isArray(rawObjects) ? rawObjects : (rawObjects instanceof Set ? [...rawObjects] : [rawObjects]);
     const object = objects.find((item) => item?.isObject3D && item.visible !== false);
     if (!object || seenObjects.has(object.uuid)) continue;
 
@@ -119,7 +117,6 @@ function candidateObjects(panel) {
     const size = box.getSize(new THREE.Vector3());
     const maxSize = Math.max(size.x, size.y, size.z);
     if (!Number.isFinite(maxSize) || maxSize <= 0) continue;
-    if (maxSize > scale * 0.62) continue;
 
     seenObjects.add(object.uuid);
     candidates.push({ entity, object, box });
@@ -145,6 +142,14 @@ function chooseCandidate(panel) {
   const robot = cleaningRobotEntity(panel);
   const robotCandidate = robot ? candidates.find((item) => item.entity === robot) : null;
   if (robotCandidate && Math.random() < ROBOT_FOCUS_CHANCE) return robotCandidate;
+
+  const anomalies = panel._ha3dOrganicTelemetry?.anomalies;
+  if (anomalies instanceof Map && anomalies.size > 0) {
+    const anomalyCandidates = candidates.filter((item) => anomalies.has(item.entity));
+    if (anomalyCandidates.length && Math.random() < 0.82) {
+      return anomalyCandidates[Math.floor(Math.random() * anomalyCandidates.length)];
+    }
+  }
 
   const recent = new Set(st.recentEntities);
   let pool = candidates.filter((item) => !recent.has(item.entity));
