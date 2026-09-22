@@ -1,0 +1,149 @@
+name: Publish HA3D v0.2.35 cinematic persistence fix
+
+on:
+  push:
+    paths:
+      - .github/workflows/hotfix-v0.2.35.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  hotfix-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fix Cinematic startup persistence
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path('custom_components/ha3d/frontend/ha3d-cinematic-off-v2.js')
+          s = path.read_text(encoding='utf-8')
+
+          old = '''  const applyToggle = (event = null) => {
+            const enabled = Boolean(toggle.checked);
+            panel._cinematicEnabled = enabled;
+            localStorage.setItem(CINEMATIC_KEY, enabled ? "1" : "0");
+            if (testButton) testButton.disabled = !enabled;
+
+            if (!enabled) cancelCinematic(panel);
+
+            // Own the toggle event so the older guard cannot cancel unrelated camera
+            // animations or force the default view after Cinematic is turned off.
+            if (event) event.stopImmediatePropagation();
+          };
+
+          toggle.addEventListener("change", applyToggle, true);
+
+          if (testButton) {
+            testButton.addEventListener(
+              "click",
+              (event) => {
+                if (panel._cinematicEnabled) return;
+                event.preventDefault();
+                event.stopImmediatePropagation();
+              },
+              true,
+            );
+          }
+
+          applyToggle();'''
+
+          new = '''  // Startup is read-only: persisted preference is the source of truth.
+          // Never write the checkbox's transient initial state back to storage here,
+          // because the control can exist for a frame before its checked state is synced.
+          const stored = localStorage.getItem(CINEMATIC_KEY);
+          const initialEnabled = stored === "0"
+            ? false
+            : stored === "1"
+              ? true
+              : (typeof panel._cinematicEnabled === "boolean" ? panel._cinematicEnabled : true);
+          panel._cinematicEnabled = initialEnabled;
+          toggle.checked = initialEnabled;
+          if (testButton) testButton.disabled = !initialEnabled;
+
+          const persistToggle = (event) => {
+            const enabled = Boolean(toggle.checked);
+            panel._cinematicEnabled = enabled;
+            localStorage.setItem(CINEMATIC_KEY, enabled ? "1" : "0");
+            if (testButton) testButton.disabled = !enabled;
+
+            if (!enabled) cancelCinematic(panel);
+
+            // Own the toggle event so the older guard cannot cancel unrelated camera
+            // animations or force the default view after Cinematic is turned off.
+            event.stopImmediatePropagation();
+          };
+
+          toggle.addEventListener("change", persistToggle, true);
+
+          if (testButton) {
+            testButton.addEventListener(
+              "click",
+              (event) => {
+                if (panel._cinematicEnabled) return;
+                event.preventDefault();
+                event.stopImmediatePropagation();
+              },
+              true,
+            );
+          }'''
+
+          if old not in s:
+              raise SystemExit('cinematic startup guard anchor not found')
+          path.write_text(s.replace(old, new, 1), encoding='utf-8')
+
+          entry = Path('custom_components/ha3d/frontend/ha3d-entry.js')
+          e = entry.read_text(encoding='utf-8')
+          old_token = 'ha3d-cinematic-off-v2.js?v=cinematic-off-2'
+          new_token = 'ha3d-cinematic-off-v2.js?v=cinematic-off-3'
+          if old_token not in e:
+              raise SystemExit('cinematic cache token not found')
+          entry.write_text(e.replace(old_token, new_token, 1), encoding='utf-8')
+
+          manifest = Path('custom_components/ha3d/manifest.json')
+          data = json.loads(manifest.read_text(encoding='utf-8'))
+          if data.get('version') != '0.2.34':
+              raise SystemExit(f"Expected 0.2.34, got {data.get('version')}")
+          data['version'] = '0.2.35'
+          manifest.write_text(json.dumps(data, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+          PY
+
+      - name: Validate frontend syntax and persistence markers
+        run: |
+          node --check custom_components/ha3d/frontend/ha3d-cinematic-off-v2.js
+          node --check custom_components/ha3d/frontend/ha3d-entry.js
+          grep -q 'Startup is read-only' custom_components/ha3d/frontend/ha3d-cinematic-off-v2.js
+          grep -q 'localStorage.getItem(CINEMATIC_KEY)' custom_components/ha3d/frontend/ha3d-cinematic-off-v2.js
+          grep -q 'persistToggle' custom_components/ha3d/frontend/ha3d-cinematic-off-v2.js
+
+      - name: Run project validation
+        run: |
+          npm run check
+          npm test
+          python -m unittest discover -s tests -p 'test_*.py'
+
+      - name: Commit fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add custom_components/ha3d/frontend/ha3d-cinematic-off-v2.js custom_components/ha3d/frontend/ha3d-entry.js custom_components/ha3d/manifest.json
+          git commit -m "Fix per-device Cinematic preference persistence"
+          git push origin HEAD:main
+
+      - name: Tag v0.2.35
+        run: |
+          git tag -a v0.2.35 -m "HA3D v0.2.35"
+          git push origin v0.2.35
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v0.2.35 --title "HA3D v0.2.35" --notes "Fixes per-device Cinematic mode persistence. Startup now reads the saved local preference and applies it to the internal state and toggle without writing anything back during initialization. Only an explicit user toggle change updates localStorage, preventing a transient unchecked control from overwriting the saved choice. Keeps v0.2.34 behavior otherwise unchanged."
