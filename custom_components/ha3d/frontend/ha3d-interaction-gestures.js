@@ -1,9 +1,12 @@
+import * as THREE from "https://esm.sh/three@0.180.0";
+
 const Panel = customElements.get("ha3d-panel");
 if (!Panel) throw new Error("HA3D panel was not registered");
 
 const proto = Panel.prototype;
 const HOLD_MS = 650;
 const MOVE_CANCEL_PX = 10;
+const editorXrayState = new WeakMap();
 
 function objectKey(object) {
   return String(object?.userData?.ha3dOriginalNodeName || object?.name || "").trim();
@@ -48,28 +51,125 @@ function updateLockBadge(panel) {
   badge.textContent = `🔒 ${name}`;
 }
 
-function temporarilyMakeInspectable(panel, object, callback) {
-  const key = objectKey(object);
-  if (!key) return callback();
-  panel._config ||= {};
-  const original = Array.isArray(panel._config.floating_widgets) ? panel._config.floating_widgets : [];
-  const already = original.some((item) => item?.enabled !== false && item?.anchor === key);
-  if (already) return callback();
-  const fake = {
-    id: `__inspect__${key}`,
-    name: "Inspeção",
-    type: "text",
-    anchor: key,
-    text: "",
-    enabled: true,
-    visibility: "click",
-  };
-  panel._config.floating_widgets = [...original, fake];
-  try {
-    return callback();
-  } finally {
-    panel._config.floating_widgets = original;
+function rememberEditorMesh(mesh) {
+  let state = editorXrayState.get(mesh);
+  if (!state) {
+    state = {
+      material: mesh.material,
+      renderOrder: mesh.renderOrder,
+      castShadow: mesh.castShadow,
+      receiveShadow: mesh.receiveShadow,
+      edge: null,
+      accent: null,
+    };
+    editorXrayState.set(mesh, state);
   }
+  return state;
+}
+
+function ensureEditorXrayMaterials(panel) {
+  if (!panel._ha3dEditorLockXrayMaterial) {
+    panel._ha3dEditorLockXrayMaterial = new THREE.MeshBasicMaterial({
+      color: 0x0bbcff,
+      transparent: true,
+      opacity: 0.12,
+      side: THREE.DoubleSide,
+      depthTest: true,
+      depthWrite: false,
+      toneMapped: false,
+    });
+  }
+  if (!panel._ha3dEditorLockXrayEdgeMaterial) {
+    panel._ha3dEditorLockXrayEdgeMaterial = new THREE.LineBasicMaterial({
+      color: 0x4de7ff,
+      transparent: true,
+      opacity: 0.52,
+      depthTest: false,
+      depthWrite: false,
+      toneMapped: false,
+    });
+  }
+  if (!panel._ha3dEditorLockAccentMaterial) {
+    panel._ha3dEditorLockAccentMaterial = new THREE.LineBasicMaterial({
+      color: 0x9af4ff,
+      transparent: true,
+      opacity: 0.98,
+      depthTest: false,
+      depthWrite: false,
+      toneMapped: false,
+    });
+  }
+}
+
+function ensureEditorEdge(panel, mesh, kind) {
+  const state = rememberEditorMesh(mesh);
+  const key = kind === "accent" ? "accent" : "edge";
+  if (!state[key] && mesh.geometry?.attributes?.position) {
+    try {
+      const material = kind === "accent"
+        ? panel._ha3dEditorLockAccentMaterial
+        : panel._ha3dEditorLockXrayEdgeMaterial;
+      const edge = new THREE.LineSegments(new THREE.EdgesGeometry(mesh.geometry, 28), material);
+      edge.name = kind === "accent" ? "__HA3D_EDITOR_LOCK_ACCENT__" : "__HA3D_EDITOR_LOCK_XRAY__";
+      edge.userData.ha3dEditorLockOverlay = true;
+      edge.renderOrder = kind === "accent" ? 42 : 40;
+      edge.visible = false;
+      mesh.add(edge);
+      state[key] = edge;
+    } catch (_error) {}
+  }
+  return state[key];
+}
+
+function selectedMeshSet(object) {
+  const selected = new Set();
+  if (!object) return selected;
+  selected.add(object);
+  object.traverse?.((node) => selected.add(node));
+  return selected;
+}
+
+function restoreEditorXray(panel) {
+  panel?._model?.traverse?.((mesh) => {
+    if (!mesh?.isMesh || mesh.userData?.ha3dEditorLockOverlay) return;
+    const state = editorXrayState.get(mesh);
+    if (!state) return;
+    if (mesh.material === panel._ha3dEditorLockXrayMaterial) mesh.material = state.material;
+    mesh.renderOrder = state.renderOrder;
+    mesh.castShadow = state.castShadow;
+    mesh.receiveShadow = state.receiveShadow;
+    if (state.edge) state.edge.visible = false;
+    if (state.accent) state.accent.visible = false;
+  });
+}
+
+function applyEditorLockXray(panel, selected) {
+  restoreEditorXray(panel);
+  if (!panel?._editorMode || !panel?._ha3dEditorLockedObject || !panel?._model || !selected) return;
+  ensureEditorXrayMaterials(panel);
+  const keepNormal = selectedMeshSet(selected);
+
+  panel._model.traverse((mesh) => {
+    if (!mesh?.isMesh || mesh.userData?.ha3dEditorLockOverlay || mesh.userData?.ha3dEditorHelper) return;
+    const state = rememberEditorMesh(mesh);
+    if (keepNormal.has(mesh)) {
+      mesh.material = state.material;
+      mesh.renderOrder = Math.max(4, state.renderOrder || 0);
+      mesh.castShadow = state.castShadow;
+      mesh.receiveShadow = state.receiveShadow;
+      const accent = ensureEditorEdge(panel, mesh, "accent");
+      if (accent) accent.visible = true;
+      if (state.edge) state.edge.visible = false;
+    } else {
+      mesh.material = panel._ha3dEditorLockXrayMaterial;
+      mesh.renderOrder = 2;
+      mesh.castShadow = false;
+      mesh.receiveShadow = false;
+      const edge = ensureEditorEdge(panel, mesh, "xray");
+      if (edge) edge.visible = true;
+      if (state.accent) state.accent.visible = false;
+    }
+  });
 }
 
 function installCardGuard(panel) {
@@ -85,8 +185,8 @@ function installCardGuard(panel) {
 
 function installLongPress(panel) {
   const canvas = panel?._renderer?.domElement;
-  if (!canvas || canvas.dataset.ha3dGestureLock === "1") return;
-  canvas.dataset.ha3dGestureLock = "1";
+  if (!canvas || canvas.dataset.ha3dGestureLock === "2") return;
+  canvas.dataset.ha3dGestureLock = "2";
 
   canvas.addEventListener("pointerdown", (event) => {
     if (panel._editorMode || panel._robotCalibrationMarker || event.button > 0) return;
@@ -95,7 +195,6 @@ function installLongPress(panel) {
 
     const startX = event.clientX;
     const startY = event.clientY;
-    let fired = false;
     let timer = 0;
 
     const cleanup = () => {
@@ -111,14 +210,16 @@ function installLongPress(panel) {
     const release = () => cleanup();
 
     timer = setTimeout(() => {
-      fired = true;
       cleanup();
       panel._ha3dSuppressTapUntil = performance.now() + 700;
       panel._ha3dEditorLockedObject = object;
       if (!panel._editorMode) panel._toggleEditor?.();
       panel._selectForEditor?.(object);
+      const selected = panel._selectedObject || object;
+      panel._ha3dEditorLockedObject = selected;
+      applyEditorLockXray(panel, selected);
       updateLockBadge(panel);
-      const name = objectKey(object) || "objeto";
+      const name = objectKey(selected) || "objeto";
       panel._setStatus?.(`Editor travado em: ${name}`);
     }, HOLD_MS);
 
@@ -128,8 +229,8 @@ function installLongPress(panel) {
   });
 }
 
-if (!proto.__ha3dInteractionGesturesV1) {
-  proto.__ha3dInteractionGesturesV1 = true;
+if (!proto.__ha3dInteractionGesturesV2) {
+  proto.__ha3dInteractionGesturesV2 = true;
 
   // Geometry never opens/toggles Home Assistant entities anymore. Entity
   // interaction is intentionally owned by the on-screen HA markers only.
@@ -154,6 +255,8 @@ if (!proto.__ha3dInteractionGesturesV1) {
     return result;
   };
 
+  // Click and double-click on geometry are intentionally neutral now. The
+  // reliable interaction gesture is the long-press, which enters locked edit.
   const oldPick = proto._pick;
   proto._pick = function (event) {
     if (this._robotCalibrationMarker) return;
@@ -165,13 +268,7 @@ if (!proto.__ha3dInteractionGesturesV1) {
     }
 
     if (performance.now() < (this._ha3dSuppressTapUntil || 0)) return;
-
-    // Single click on geometry is deliberately neutral. A double click is the
-    // explicit inspection gesture and reuses the floating-widget inspector.
-    if (Number(event?.detail || 0) < 2) return;
-    const object = this._pickObject?.(event);
-    if (!object) return oldPick?.call(this, event);
-    return temporarilyMakeInspectable(this, object, () => oldPick?.call(this, event));
+    return;
   };
 
   const oldSelectForEditor = proto._selectForEditor;
@@ -188,6 +285,7 @@ if (!proto.__ha3dInteractionGesturesV1) {
       return this._selectedObject;
     }
     const result = oldSelectForEditor?.call(this, object, ...args);
+    if (this._editorMode && this._ha3dEditorLockedObject) applyEditorLockXray(this, this._selectedObject || this._ha3dEditorLockedObject);
     updateLockBadge(this);
     return result;
   };
@@ -208,7 +306,12 @@ if (!proto.__ha3dInteractionGesturesV1) {
   proto._toggleEditor = function (...args) {
     const wasEditing = Boolean(this._editorMode);
     const result = oldToggleEditor?.apply(this, args);
-    if (wasEditing && !this._editorMode) this._ha3dEditorLockedObject = null;
+    if (wasEditing && !this._editorMode) {
+      restoreEditorXray(this);
+      this._ha3dEditorLockedObject = null;
+    } else if (this._editorMode && this._ha3dEditorLockedObject) {
+      applyEditorLockXray(this, this._selectedObject || this._ha3dEditorLockedObject);
+    }
     updateLockBadge(this);
     installCardGuard(this);
     return result;
@@ -216,9 +319,16 @@ if (!proto.__ha3dInteractionGesturesV1) {
 
   const oldLoadModel = proto._loadModel;
   proto._loadModel = async function (...args) {
+    restoreEditorXray(this);
     this._ha3dEditorLockedObject = null;
     const result = await oldLoadModel?.apply(this, args);
     updateLockBadge(this);
     return result;
+  };
+
+  const oldDisconnected = proto.disconnectedCallback;
+  proto.disconnectedCallback = function (...args) {
+    restoreEditorXray(this);
+    return oldDisconnected?.apply(this, args);
   };
 }
