@@ -1,0 +1,19 @@
+name: Publish HA3D v0.2.22
+
+on:
+  push:
+    paths:
+      - '.github/workflows/release-v0.2.22.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish v0.2.22
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view v0.2.22 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create v0.2.22 --repo "$GITHUB_REPOSITORY" --target "67f63111757475cc8d5bb92c36b2391991bc690a" --title "HA3D v0.2.22" --notes "Prevent simultaneous callouts from sharing the same upper or lower screen band. Red anomaly callouts keep priority and blue telemetry automatically moves to the opposite band; on short screens the blue card is pushed farther outward if rectangles still touch. Keeps the v0.2.21 edge placement behavior otherwise unchanged. Rollback branch: pre-callout-lane-lock-0.2.21."
