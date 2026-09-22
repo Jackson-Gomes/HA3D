@@ -27,10 +27,12 @@ function ease(t) {
 }
 
 function isXrayActive(panel) {
-  return Boolean(
-    panel?._ha3dIdleActive &&
-      panel?.shadowRoot?.querySelector("#root")?.classList.contains("ha3d-idle-xray"),
-  );
+  // The idle controller is the source of truth. During X-Ray transitions the
+  // CSS class can lag the controller state by a frame, so requiring both
+  // signals could keep autonomous exploration permanently disarmed.
+  const idleActive = panel?._ha3dIdleActive === true;
+  const rootHasXray = panel?.shadowRoot?.querySelector("#root")?.classList.contains("ha3d-idle-xray") === true;
+  return Boolean(idleActive || rootHasXray);
 }
 
 function explorationState(panel) {
