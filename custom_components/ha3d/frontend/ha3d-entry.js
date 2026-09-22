@@ -19,6 +19,7 @@ import "./ha3d-echo-mode.js?v=echo-mode-2";
 import "./ha3d-xray-open-alert.js?v=xray-open-alert-1";
 import "./ha3d-live-telemetry-hud.js?v=live-telemetry-1";
 import "./ha3d-live-telemetry-organic.js?v=live-telemetry-organic-1";
+import "./ha3d-callout-edge-placement.js?v=callout-edge-placement-1";
 import "./ha3d-native-state-icons.js?v=native-state-icons-1";
 import "./ha3d-custom-view-drawer.js?v=custom-view-drawer-1";
 import "./ha3d-camera-lens.js?v=camera-fisheye-1";
