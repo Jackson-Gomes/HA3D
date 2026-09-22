@@ -82,7 +82,7 @@ def _is_valid_robot(value: Any) -> bool:
     if not isinstance(value, dict):
         return False
     allowed = {
-        "id", "name", "vacuum_entity", "position_entity", "object_name", "display",
+        "id", "name", "vacuum_entity", "position_entity", "map_entity", "map_overlay", "object_name", "display",
         "floor_y", "floor_plane", "visible_states", "smoothing_ms", "stale_after_s",
         "remote_pulse_ms", "remote_settle_ms", "calibration",
     }
@@ -94,6 +94,17 @@ def _is_valid_robot(value: Any) -> bool:
         return False
     if "object_name" in value and (not isinstance(value["object_name"], str) or len(value["object_name"]) > 255):
         return False
+    if "map_entity" in value and not _is_entity_id(value["map_entity"]):
+        return False
+    if "map_overlay" in value:
+        overlay = value["map_overlay"]
+        if not isinstance(overlay, dict) or set(overlay) - {"visible", "x", "z", "y", "scale", "rotation", "opacity"}:
+            return False
+        if "visible" in overlay and not isinstance(overlay["visible"], bool):
+            return False
+        for key in ("x", "z", "y", "scale", "rotation", "opacity"):
+            if key in overlay and not _is_number(overlay[key]):
+                return False
     if value.get("display", "icon") not in {"icon", "object"}:
         return False
     if value.get("floor_plane", "xz") not in {"xz", "xy", "yz"}:

@@ -43,6 +43,19 @@ class RobotSchemaTests(unittest.TestCase):
         self.robot["floor_plane"] = "zz"
         self.assertFalse(valid(self.robot))
 
+    def test_map_overlay_shared_config(self):
+        self.robot["map_entity"] = "image.xiaomi_map"
+        self.robot["map_overlay"] = {"visible": False, "x": 0.27715605, "z": -1.0158935, "y": 0.24, "scale": 0.05, "rotation": -89, "opacity": 0.8}
+        self.assertTrue(valid(self.robot))
+
+    def test_invalid_map_overlay_rejected(self):
+        robot = deepcopy(self.robot)
+        robot["map_overlay"] = {"visible": "no", "x": 0}
+        self.assertFalse(valid(robot))
+        robot = deepcopy(self.robot)
+        robot["map_overlay"] = {"x": 0, "unexpected": 1}
+        self.assertFalse(valid(robot))
+
 
 if __name__ == "__main__":
     unittest.main()
