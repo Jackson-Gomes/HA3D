@@ -4,10 +4,10 @@ const Panel = customElements.get("ha3d-panel");
 if (!Panel) throw new Error("HA3D panel was not registered");
 
 const proto = Panel.prototype;
-const FIRST_MIN_MS = 9000;
-const FIRST_MAX_MS = 15000;
-const NEXT_MIN_MS = 18000;
-const NEXT_MAX_MS = 32000;
+const FIRST_MIN_MS = 2500;
+const FIRST_MAX_MS = 4500;
+const NEXT_MIN_MS = 12000;
+const NEXT_MAX_MS = 20000;
 const ROBOT_NEXT_MIN_MS = 7500;
 const ROBOT_NEXT_MAX_MS = 13500;
 const ROBOT_FOCUS_CHANCE = 0.68;
@@ -317,7 +317,7 @@ async function returnToOrbit(panel, savedPos, savedTarget, fast = false) {
 
 async function startExploration(panel) {
   const st = explorationState(panel);
-  if (st.active || !isXrayActive(panel) || hasAnomalyPriority(panel) || (calloutBusy(panel) && !cleaningRobotEntity(panel))) return false;
+  if (st.active || !isXrayActive(panel) || hasAnomalyPriority(panel)) return false;
   if (performance.now() - st.lastUserActivity < USER_QUIET_MS) return false;
 
   const candidate = chooseCandidate(panel);
@@ -327,6 +327,7 @@ async function startExploration(panel) {
   st.abortRequested = false;
   panel._ha3dAiExplorationActive = true;
   panel._ha3dAiExplorationTarget = candidate.entity;
+  panel._ha3dScannerInspect?.(candidate.entity, "ACTIVE SCAN");
 
   const savedPos = panel._camera.position.clone();
   const savedTarget = panel._controls.target.clone();
@@ -392,7 +393,6 @@ function evaluate(panel) {
 
   if (
     hasAnomalyPriority(panel) ||
-    (calloutBusy(panel) && !cleaningRobotEntity(panel)) ||
     performance.now() - st.lastUserActivity < USER_QUIET_MS
   ) {
     st.dueAt = Date.now() + randomBetween(3500, 6500);
