@@ -1,0 +1,62 @@
+name: Publish HA3D v0.2.45 floating widgets
+
+on:
+  push:
+    paths:
+      - .github/workflows/release-v0.2.45.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify release contents
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          manifest=json.loads(Path('custom_components/ha3d/manifest.json').read_text())
+          assert manifest['version']=='0.2.45'
+          init=Path('custom_components/ha3d/__init__.py').read_text()
+          assert 'FRONTEND_VERSION = "0.2.45"' in init
+          assert 'HA3DFloatingWidgetsView' in init
+          storage=Path('custom_components/ha3d/storage.py').read_text()
+          assert '"floating_widgets": []' in storage
+          api=Path('custom_components/ha3d/floating_widgets.py').read_text()
+          for marker in ['/api/ha3d/floating_widgets', 'invalid_floating_widgets', 'zoom_threshold', 'chart_hours']:
+              assert marker in api
+          entry=Path('custom_components/ha3d/frontend/ha3d-entry.js').read_text()
+          assert 'ha3d-floating-widgets.js?v=floating-widgets-1' in entry
+          frontend=Path('custom_components/ha3d/frontend/ha3d-floating-widgets.js').read_text()
+          for marker in ['+ Texto', '+ Estado', '+ Imagem', '+ Gráfico', 'Quando aproximar', 'Quando clicar no objeto', 'zoomToObject', 'applyInspectorVisual', '_editorMode']:
+              assert marker in frontend
+          PY
+      - name: Run validation
+        run: |
+          python -m compileall -q custom_components/ha3d
+          npm run check
+          npm test
+          python -m unittest discover -s tests -p 'test_*.py'
+      - name: Tag release
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a v0.2.45 -m "HA3D v0.2.45"
+          git push origin v0.2.45
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v0.2.45 --title "HA3D v0.2.45" --notes "Adiciona widgets flutuantes ancorados a objetos: texto, estado de entidade, imagem e gráfico histórico. Cada widget pode ser movido e redimensionado no Editor, usar exibição Sempre, Quando aproximar ou Quando clicar, e o modo de aproximação possui slider de distância. Fora do Editor, clicar em um objeto com widgets aplica um zoom-in curto, mantém o objeto em material normal com contorno ciano e coloca o restante da cena em X-Ray azul, exibindo os balões associados. No Editor, zoom automático, X-Ray e balões ficam desativados para preservar a edição limpa. A v0.2.44 permanece disponível como rollback."
