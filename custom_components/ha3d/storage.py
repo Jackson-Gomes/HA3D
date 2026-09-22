@@ -18,6 +18,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "area_bindings": {},
     "advanced_bindings": {},
     "robots": [],
+    "virtual_lights": [],
 }
 
 
@@ -34,6 +35,7 @@ class HA3DStore:
             self._data = deepcopy(DEFAULT_CONFIG)
             self._data.update(stored)
             self._data["bindings"] = dict(stored.get("bindings", {}))
+            self._data["virtual_lights"] = list(stored.get("virtual_lights", []))
         return deepcopy(self._data)
 
     async def async_update(self, changes: dict[str, Any]) -> dict[str, Any]:
