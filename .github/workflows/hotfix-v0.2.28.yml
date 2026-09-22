@@ -1,0 +1,68 @@
+name: Publish HA3D v0.2.28 scanner gate hotfix
+
+on:
+  push:
+    paths:
+      - .github/workflows/hotfix-v0.2.28.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  hotfix-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Remove Cinematic dependency from Scanner idle gate
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          xray = Path('custom_components/ha3d/frontend/ha3d-xray-idle-v4.js')
+          text = xray.read_text(encoding='utf-8')
+          old = '    panel?.isConnected &&\n      panel._cinematicEnabled &&\n      panel._model &&'
+          new = '    panel?.isConnected &&\n      panel._model &&'
+          if old not in text:
+              raise SystemExit('Expected Scanner/Cinematic gate was not found')
+          xray.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          entry = Path('custom_components/ha3d/frontend/ha3d-entry.js')
+          e = entry.read_text(encoding='utf-8')
+          if 'ha3d-xray-idle-v4.js?v=xray-idle-4' not in e:
+              raise SystemExit('Expected X-Ray cache token was not found')
+          e = e.replace('ha3d-xray-idle-v4.js?v=xray-idle-4', 'ha3d-xray-idle-v4.js?v=xray-idle-5', 1)
+          entry.write_text(e, encoding='utf-8')
+
+          manifest = Path('custom_components/ha3d/manifest.json')
+          data = json.loads(manifest.read_text(encoding='utf-8'))
+          if data.get('version') != '0.2.27':
+              raise SystemExit(f"Expected 0.2.27, got {data.get('version')}")
+          data['version'] = '0.2.28'
+          manifest.write_text(json.dumps(data, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+          PY
+
+      - name: Commit hotfix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add custom_components/ha3d/frontend/ha3d-xray-idle-v4.js custom_components/ha3d/frontend/ha3d-entry.js custom_components/ha3d/manifest.json
+          git commit -m "Fix Scanner entry when Cinematic is disabled"
+          git push origin HEAD:main
+
+      - name: Tag v0.2.28
+        run: |
+          git tag -a v0.2.28 -m "HA3D v0.2.28"
+          git push origin v0.2.28
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v0.2.28 \
+            --title "HA3D v0.2.28" \
+            --notes "Fixes Scanner/X-Ray idle entry when Cinematic is disabled. Scanner now enters after the idle timeout independently of the Cinematic toggle, while preserving the existing camera/model safety gates. Includes the v0.2.27 active-vacuum attention behavior."
