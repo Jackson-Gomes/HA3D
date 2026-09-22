@@ -112,22 +112,30 @@ function pulse(panel) {
 }
 
 function state(panel) {
-  if (!panel._ha3dXrayAnomalyVisual) panel._ha3dXrayAnomalyVisual = { raf: 0 };
+  if (!panel._ha3dXrayAnomalyVisual) panel._ha3dXrayAnomalyVisual = { raf: 0, lastApply: 0 };
   return panel._ha3dXrayAnomalyVisual;
 }
 
-function frame(panel) {
+function frame(panel, now) {
   const st = state(panel);
   if (!panel.isConnected) { st.raf = 0; return; }
-  pulse(panel);
-  st.raf = requestAnimationFrame(() => frame(panel));
+  if (isXrayActive(panel)) {
+    if (now - st.lastApply > 600) {
+      st.lastApply = now;
+      apply(panel);
+    }
+    pulse(panel);
+  } else {
+    st.lastApply = 0;
+  }
+  st.raf = requestAnimationFrame((time) => frame(panel, time));
 }
 
 function install(panel) {
   ensureMaterials(panel);
   apply(panel);
   const st = state(panel);
-  if (!st.raf) st.raf = requestAnimationFrame(() => frame(panel));
+  if (!st.raf) st.raf = requestAnimationFrame((time) => frame(panel, time));
 }
 
 function cleanup(panel) {
