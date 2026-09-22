@@ -1,0 +1,65 @@
+name: Publish HA3D v0.2.41 virtual lights
+
+on:
+  push:
+    paths:
+      - .github/workflows/release-v0.2.41.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify release contents
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          manifest=json.loads(Path('custom_components/ha3d/manifest.json').read_text())
+          assert manifest['version']=='0.2.41'
+          init=Path('custom_components/ha3d/__init__.py').read_text()
+          assert 'FRONTEND_VERSION = "0.2.41"' in init
+          assert 'HA3DVirtualLightsView' in init
+          storage=Path('custom_components/ha3d/storage.py').read_text()
+          assert '"virtual_lights": []' in storage
+          api=Path('custom_components/ha3d/virtual_lights.py').read_text()
+          for marker in ['/api/ha3d/virtual_lights', '_is_valid_virtual_lights', 'point', 'spot']:
+              assert marker in api
+          entry=Path('custom_components/ha3d/frontend/ha3d-entry.js').read_text()
+          assert 'ha3d-virtual-lights.js?v=virtual-lights-1' in entry
+          assert 'ha3d-virtual-lights-api-adapter.js?v=virtual-lights-api-1' in entry
+          frontend=Path('custom_components/ha3d/frontend/ha3d-virtual-lights.js').read_text()
+          for marker in ['+ Point', '+ Spot', '_createVirtualLight', '_duplicateVirtualLight', '_removeVirtualLight', 'color_temp_kelvin']:
+              assert marker in frontend
+          adapter=Path('custom_components/ha3d/frontend/ha3d-virtual-lights-api-adapter.js').read_text()
+          assert 'ha3d/virtual_lights' in adapter
+          PY
+      - name: Run validation
+        run: |
+          python -m compileall -q custom_components/ha3d
+          npm run check
+          npm test
+          python -m unittest discover -s tests -p 'test_*.py'
+      - name: Tag release
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a v0.2.41 -m "HA3D v0.2.41"
+          git push origin v0.2.41
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v0.2.41 --title "HA3D v0.2.41" --notes "Adiciona iluminação virtual sem alterar o GLB nem a lógica estável da v0.2.40. O Editor Mode agora pode criar Point Lights e Spot Lights, vincular a entidades light.* do Home Assistant, ajustar intensidade, alcance, cor, ângulo, penumbra, sombras, posição e rotação, mover/rotacionar com o gizmo, duplicar e remover. Estados on/off, brightness, rgb_color e color_temp_kelvin são refletidos em tempo real. As luzes ficam em uma configuração virtual_lights e endpoint próprios, isolados de bindings, object_positions e robots."
