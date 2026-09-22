@@ -8,6 +8,9 @@ const FIRST_MIN_MS = 9000;
 const FIRST_MAX_MS = 15000;
 const NEXT_MIN_MS = 18000;
 const NEXT_MAX_MS = 32000;
+const ROBOT_NEXT_MIN_MS = 7500;
+const ROBOT_NEXT_MAX_MS = 13500;
+const ROBOT_FOCUS_CHANCE = 0.68;
 const MOVE_IN_MS = 1700;
 const SCAN_MS = 2100;
 const HOLD_MIN_MS = 900;
@@ -123,10 +126,23 @@ function candidateObjects(panel) {
   return candidates;
 }
 
+function cleaningRobotEntity(panel) {
+  const states = panel?._hass?.states || {};
+  return Object.keys(states).find((entity) =>
+    entity.startsWith("vacuum.") && ["cleaning", "spot_cleaning"].includes(String(states[entity]?.state || "").toLowerCase())
+  ) || null;
+}
+
 function chooseCandidate(panel) {
   const st = explorationState(panel);
   const candidates = candidateObjects(panel);
   if (!candidates.length) return null;
+
+  // While the vacuum is working, treat it as a live moving subject. It gets
+  // repeated attention, but not every pass, so the rest of the home remains alive.
+  const robot = cleaningRobotEntity(panel);
+  const robotCandidate = robot ? candidates.find((item) => item.entity === robot) : null;
+  if (robotCandidate && Math.random() < ROBOT_FOCUS_CHANCE) return robotCandidate;
 
   const recent = new Set(st.recentEntities);
   let pool = candidates.filter((item) => !recent.has(item.entity));
@@ -138,8 +154,9 @@ function chooseCandidate(panel) {
 
 function scheduleNext(panel, first = false) {
   const st = explorationState(panel);
-  const min = first ? FIRST_MIN_MS : NEXT_MIN_MS;
-  const max = first ? FIRST_MAX_MS : NEXT_MAX_MS;
+  const robotCleaning = Boolean(cleaningRobotEntity(panel));
+  const min = first ? FIRST_MIN_MS : (robotCleaning ? ROBOT_NEXT_MIN_MS : NEXT_MIN_MS);
+  const max = first ? FIRST_MAX_MS : (robotCleaning ? ROBOT_NEXT_MAX_MS : NEXT_MAX_MS);
   st.dueAt = Date.now() + randomBetween(min, max);
 }
 
@@ -300,7 +317,7 @@ async function returnToOrbit(panel, savedPos, savedTarget, fast = false) {
 
 async function startExploration(panel) {
   const st = explorationState(panel);
-  if (st.active || !isXrayActive(panel) || hasAnomalyPriority(panel) || calloutBusy(panel)) return false;
+  if (st.active || !isXrayActive(panel) || hasAnomalyPriority(panel) || (calloutBusy(panel) && !cleaningRobotEntity(panel))) return false;
   if (performance.now() - st.lastUserActivity < USER_QUIET_MS) return false;
 
   const candidate = chooseCandidate(panel);
@@ -375,7 +392,7 @@ function evaluate(panel) {
 
   if (
     hasAnomalyPriority(panel) ||
-    calloutBusy(panel) ||
+    (calloutBusy(panel) && !cleaningRobotEntity(panel)) ||
     performance.now() - st.lastUserActivity < USER_QUIET_MS
   ) {
     st.dueAt = Date.now() + randomBetween(3500, 6500);
