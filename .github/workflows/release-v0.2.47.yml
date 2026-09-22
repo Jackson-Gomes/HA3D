@@ -1,0 +1,56 @@
+name: Publish HA3D v0.2.47 editor lock xray
+
+on:
+  push:
+    paths:
+      - .github/workflows/release-v0.2.47.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify release contents
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          manifest=json.loads(Path('custom_components/ha3d/manifest.json').read_text())
+          assert manifest['version']=='0.2.47'
+          init=Path('custom_components/ha3d/__init__.py').read_text()
+          assert 'FRONTEND_VERSION = "0.2.47"' in init
+          entry=Path('custom_components/ha3d/frontend/ha3d-entry.js').read_text()
+          assert 'ha3d-interaction-gestures.js?v=interaction-gestures-2' in entry
+          gestures=Path('custom_components/ha3d/frontend/ha3d-interaction-gestures.js').read_text()
+          for marker in ['applyEditorLockXray', 'restoreEditorXray', 'HOLD_MS = 650', '_ha3dEditorLockedObject', 'Click and double-click on geometry are intentionally neutral']:
+              assert marker in gestures
+          PY
+      - name: Run validation
+        run: |
+          python -m compileall -q custom_components/ha3d
+          npm run check
+          npm test
+          python -m unittest discover -s tests -p 'test_*.py'
+      - name: Tag release
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a v0.2.47 -m "HA3D v0.2.47"
+          git push origin v0.2.47
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v0.2.47 --title "HA3D v0.2.47" --notes "Simplifica a interação da geometria em torno do clique longo. Click e double-click ficam neutros. O long-press entra no Editor Mode travado no objeto selecionado e isola visualmente a edição: o objeto editado preserva material normal e recebe contorno ciano, enquanto o restante da cena entra em X-Ray azul com sombras desativadas. Ao sair do Editor, materiais, render order e sombras são restaurados. O lock continua impedindo seleção e arraste acidental de outra geometria. A v0.2.46 permanece disponível como rollback."
