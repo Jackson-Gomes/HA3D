@@ -9,7 +9,9 @@ const CYAN = "#71efff";
 const MAX_LOG_LINES = 7;
 
 function isXrayActive(panel) {
-  return Boolean(panel?.shadowRoot?.querySelector("#root")?.classList.contains("ha3d-idle-xray"));
+  const controllerActive = panel?._ha3dIdleActive === true;
+  const visualActive = panel?.shadowRoot?.querySelector("#root")?.classList.contains("ha3d-idle-xray") === true;
+  return Boolean(controllerActive || visualActive);
 }
 
 function scalar(value) {
