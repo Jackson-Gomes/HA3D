@@ -2,8 +2,8 @@ const Panel = customElements.get("ha3d-panel");
 if (!Panel) throw new Error("HA3D panel was not registered");
 
 const proto = Panel.prototype;
-const GIZMO_SIZE = 1.45;
-const GIZMO_CLICK_GUARD_MS = 350;
+const GIZMO_SIZE = 1.25;
+const GIZMO_CLICK_GUARD_MS = 220;
 
 function nowMs() {
   return globalThis.performance?.now?.() ?? Date.now();
@@ -43,7 +43,7 @@ function configureGizmo(panel) {
 
   controls.addEventListener("dragging-changed", (event) => {
     panel._ha3dGizmoPointerActive = Boolean(event.value);
-    guard();
+    if (event.value) guard();
   });
 
   controls.addEventListener("mouseUp", () => {
@@ -58,7 +58,6 @@ function gizmoOwnsPointer(panel) {
   return Boolean(
     panel._ha3dGizmoPointerActive
     || controls?.dragging
-    || controls?.axis
     || nowMs() < (panel._ha3dSuppressModelPickUntil || 0)
   );
 }
@@ -82,8 +81,8 @@ if (!proto.__ha3dEditorGizmoPersistenceFixV1) {
 
   const oldPick = proto._pick;
   proto._pick = function (event) {
-    // The canvas emits a normal click after TransformControls releases an axis.
-    // Ignore that click so geometry behind the gizmo cannot steal selection.
+    // Suppress only a real TransformControls click/drag and its immediate
+    // trailing canvas click. Merely hovering an axis must never block model picking.
     if (gizmoOwnsPointer(this)) return;
     return oldPick?.call(this, event);
   };
