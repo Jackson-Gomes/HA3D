@@ -51,6 +51,51 @@ function refreshPlacement(track, entity, y, height, cardHeight, isAlert) {
   track.lateral = randomBetween(-18, 18);
 }
 
+function overlapsRect(a, b, margin = 0) {
+  return !(
+    a.right + margin <= b.left ||
+    a.left >= b.right + margin ||
+    a.bottom + margin <= b.top ||
+    a.top >= b.bottom + margin
+  );
+}
+
+function reserveAmbientStatus(panel, track, cardX, cardY, cardWidth, cardHeight, layerRect, height) {
+  if (track.band !== "bottom") return { cardX, cardY };
+  const status = panel.shadowRoot?.querySelector("#ha3dAmbientStatus");
+  if (!status) return { cardX, cardY };
+
+  const statusRectRaw = status.getBoundingClientRect?.();
+  if (!statusRectRaw?.width || !statusRectRaw?.height) return { cardX, cardY };
+
+  const statusRect = {
+    left: statusRectRaw.left - layerRect.left,
+    right: statusRectRaw.right - layerRect.left,
+    top: statusRectRaw.top - layerRect.top,
+    bottom: statusRectRaw.bottom - layerRect.top,
+  };
+  const predicted = {
+    left: cardX,
+    right: cardX + cardWidth,
+    top: cardY,
+    bottom: cardY + cardHeight,
+  };
+
+  if (!overlapsRect(predicted, statusRect, 20)) return { cardX, cardY };
+
+  const leftSlot = statusRect.left - cardWidth - 26;
+  if (leftSlot >= 14) {
+    return { cardX: Math.min(cardX, leftSlot), cardY };
+  }
+
+  // Very narrow viewport: protect the clock/weather block and move the callout upward.
+  track.band = "top";
+  return {
+    cardX,
+    cardY: Math.max(18, Math.min(height * 0.26 - cardHeight * 0.55, height - cardHeight - 18)),
+  };
+}
+
 function layoutCallout(panel, options) {
   const {
     entity,
@@ -117,6 +162,10 @@ function layoutCallout(panel, options) {
 
   cardX = Math.max(14, Math.min(width - cardWidth - 14, cardX));
   cardY = Math.max(18, Math.min(height - cardHeight - 18, cardY));
+
+  const reserved = reserveAmbientStatus(panel, track, cardX, cardY, cardWidth, cardHeight, layerRect, height);
+  cardX = Math.max(14, Math.min(width - cardWidth - 14, reserved.cardX));
+  cardY = Math.max(18, Math.min(height - cardHeight - 18, reserved.cardY));
 
   card.style.left = `${cardX}px`;
   card.style.top = `${cardY}px`;
