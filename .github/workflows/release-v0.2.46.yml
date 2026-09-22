@@ -1,0 +1,56 @@
+name: Publish HA3D v0.2.46 interaction gestures
+
+on:
+  push:
+    paths:
+      - .github/workflows/release-v0.2.46.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify release contents
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          manifest=json.loads(Path('custom_components/ha3d/manifest.json').read_text())
+          assert manifest['version']=='0.2.46'
+          init=Path('custom_components/ha3d/__init__.py').read_text()
+          assert 'FRONTEND_VERSION = "0.2.46"' in init
+          entry=Path('custom_components/ha3d/frontend/ha3d-entry.js').read_text()
+          assert 'ha3d-interaction-gestures.js?v=interaction-gestures-1' in entry
+          gestures=Path('custom_components/ha3d/frontend/ha3d-interaction-gestures.js').read_text()
+          for marker in ['HOLD_MS = 650', 'event?.detail || 0', '_ha3dEditorLockedObject', '_runEntityAction = async function () {}', 'ha3dEditorLockBadge', 'ha3dIconOnlyEntities']:
+              assert marker in gestures
+          PY
+      - name: Run validation
+        run: |
+          python -m compileall -q custom_components/ha3d
+          npm run check
+          npm test
+          python -m unittest discover -s tests -p 'test_*.py'
+      - name: Tag release
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a v0.2.46 -m "HA3D v0.2.46"
+          git push origin v0.2.46
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v0.2.46 --title "HA3D v0.2.46" --notes "Refina a interação com a geometria sem alterar os módulos estáveis. Um clique simples no objeto fica neutro; entidades abrem somente pelos ícones do Home Assistant. Duplo clique entra no modo de inspeção visual, com zoom curto, objeto destacado e restante da cena em X-Ray, mostrando widgets associados quando houver. Clique longo entra no Editor Mode travado naquele objeto; enquanto o lock estiver ativo, clicar ou arrastar outra geometria não troca a seleção. O editor mostra um badge de lock e o bloqueio é liberado ao sair do Editor. Balões flutuantes também deixam de abrir entidades ao clicar. A v0.2.45 permanece disponível como rollback."
