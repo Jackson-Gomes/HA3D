@@ -26,16 +26,8 @@ jobs:
           ai = Path('custom_components/ha3d/frontend/ha3d-ai-autonomous-exploration.js')
           a = ai.read_text(encoding='utf-8')
 
-          old_priority = '''function hasAnomalyPriority(panel) {
-            const anomalies = panel._ha3dOrganicTelemetry?.anomalies;
-            if (anomalies instanceof Map && anomalies.size > 0) return true;
-            const inspection = panel._ha3dAiInspectionFocus;
-            return Boolean(inspection?.active || inspection?.pendingEntity || panel._ha3dAiFocusActive);
-          }'''
-          new_priority = '''function hasAnomalyPriority(panel) {
-            const inspection = panel._ha3dAiInspectionFocus;
-            return Boolean(inspection?.active || panel._ha3dAiFocusActive);
-          }'''
+          old_priority = 'function hasAnomalyPriority(panel) {\n  const anomalies = panel._ha3dOrganicTelemetry?.anomalies;\n  if (anomalies instanceof Map && anomalies.size > 0) return true;\n  const inspection = panel._ha3dAiInspectionFocus;\n  return Boolean(inspection?.active || inspection?.pendingEntity || panel._ha3dAiFocusActive);\n}'
+          new_priority = 'function hasAnomalyPriority(panel) {\n  const inspection = panel._ha3dAiInspectionFocus;\n  return Boolean(inspection?.active || panel._ha3dAiFocusActive);\n}'
           if old_priority not in a:
               raise SystemExit('Anomaly priority block not found')
           a = a.replace(old_priority, new_priority, 1)
@@ -51,63 +43,27 @@ jobs:
               raise SystemExit('Candidate size filter not found')
           a = a.replace(old_size_filter, '', 1)
 
-          robot_block = '''  const robot = cleaningRobotEntity(panel);
-          const robotCandidate = robot ? candidates.find((item) => item.entity === robot) : null;
-          if (robotCandidate && Math.random() < ROBOT_FOCUS_CHANCE) return robotCandidate;
-
-          const recent = new Set(st.recentEntities);'''
-          anomaly_block = '''  const robot = cleaningRobotEntity(panel);
-          const robotCandidate = robot ? candidates.find((item) => item.entity === robot) : null;
-          if (robotCandidate && Math.random() < ROBOT_FOCUS_CHANCE) return robotCandidate;
-
-          const anomalies = panel._ha3dOrganicTelemetry?.anomalies;
-          if (anomalies instanceof Map && anomalies.size > 0) {
-            const anomalyCandidates = candidates.filter((item) => anomalies.has(item.entity));
-            if (anomalyCandidates.length && Math.random() < 0.82) {
-              return anomalyCandidates[Math.floor(Math.random() * anomalyCandidates.length)];
-            }
-          }
-
-          const recent = new Set(st.recentEntities);'''
-          if robot_block not in a:
-              raise SystemExit('Robot candidate block not found')
-          a = a.replace(robot_block, anomaly_block, 1)
+          robot_anchor = '  if (robotCandidate && Math.random() < ROBOT_FOCUS_CHANCE) return robotCandidate;\n\n'
+          anomaly_insert = robot_anchor + '  const anomalies = panel._ha3dOrganicTelemetry?.anomalies;\n  if (anomalies instanceof Map && anomalies.size > 0) {\n    const anomalyCandidates = candidates.filter((item) => anomalies.has(item.entity));\n    if (anomalyCandidates.length && Math.random() < 0.82) {\n      return anomalyCandidates[Math.floor(Math.random() * anomalyCandidates.length)];\n    }\n  }\n\n'
+          if robot_anchor not in a:
+              raise SystemExit('Robot candidate anchor not found')
+          a = a.replace(robot_anchor, anomaly_insert, 1)
           ai.write_text(a, encoding='utf-8')
 
           focus = Path('custom_components/ha3d/frontend/ha3d-ai-inspection-focus.js')
           f = focus.read_text(encoding='utf-8')
 
-          old_start = '''async function startFocus(panel, entity) {
-            const st = focusState(panel);'''
-          new_start = '''async function startFocus(panel, entity) {
-            const st = focusState(panel);
-            if (panel._ha3dAiExplorationActive) return false;'''
+          old_start = 'async function startFocus(panel, entity) {\n  const st = focusState(panel);'
+          new_start = 'async function startFocus(panel, entity) {\n  const st = focusState(panel);\n  if (panel._ha3dAiExplorationActive) return false;'
           if old_start not in f:
               raise SystemExit('Inspection focus start point not found')
           f = f.replace(old_start, new_start, 1)
 
-          old_eval = '''  if (!isXrayActive(panel)) {
-            st.pendingEntity = null;
-            st.dueAt = 0;
-            return;
-          }
-
-          refreshCandidates(panel);'''
-          new_eval = '''  if (!isXrayActive(panel)) {
-            st.pendingEntity = null;
-            st.dueAt = 0;
-            return;
-          }
-
-          if (panel._ha3dAiExplorationActive) {
-            if (st.pendingEntity) st.dueAt = Date.now() + 1800;
-            return;
-          }
-
-          refreshCandidates(panel);'''
-          if old_eval not in f:
+          eval_anchor = '  if (!isXrayActive(panel)) {\n    st.pendingEntity = null;\n    st.dueAt = 0;\n    return;\n  }\n\n  refreshCandidates(panel);'
+          eval_replacement = '  if (!isXrayActive(panel)) {\n    st.pendingEntity = null;\n    st.dueAt = 0;\n    return;\n  }\n\n  if (panel._ha3dAiExplorationActive) {\n    if (st.pendingEntity) st.dueAt = Date.now() + 1800;\n    return;\n  }\n\n  refreshCandidates(panel);'
+          if eval_anchor not in f:
               raise SystemExit('Inspection focus evaluate point not found')
-          f = f.replace(old_eval, new_eval, 1)
+          f = f.replace(eval_anchor, eval_replacement, 1)
           focus.write_text(f, encoding='utf-8')
 
           entry = Path('custom_components/ha3d/frontend/ha3d-entry.js')
