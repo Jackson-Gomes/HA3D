@@ -1,0 +1,19 @@
+name: Publish HA3D v0.2.25
+
+on:
+  push:
+    paths:
+      - '.github/workflows/release-v0.2.25.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish v0.2.25
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view v0.2.25 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create v0.2.25 --repo "$GITHUB_REPOSITORY" --target "52503deddf2b3d999c7608a6039bce276829b9ca" --title "HA3D v0.2.25" --notes "Adds autonomous AI-style exploration to idle X-Ray. After entering X-Ray, the camera now periodically chooses real Home Assistant-bound geometry, moves in for a restrained inspection, makes a slow lateral scan, pauses briefly, and returns to the exact orbit. The first exploration occurs after roughly 9-15 seconds, then repeats about every 18-32 seconds. Recent targets are avoided for variety. User interaction aborts the move, and any real anomaly immediately takes priority so the existing red anomaly inspection remains authoritative. Rollback branch: pre-ai-autonomous-exploration-0.2.24."
