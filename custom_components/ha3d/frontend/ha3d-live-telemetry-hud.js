@@ -10,7 +10,9 @@ const CALLOUT_LIFETIME_MS = 5200;
 const MAX_SAMPLES = 28;
 
 function isXrayActive(panel) {
-  return Boolean(panel?.shadowRoot?.querySelector("#root")?.classList.contains("ha3d-idle-xray"));
+  const controllerActive = panel?._ha3dIdleActive === true;
+  const visualActive = panel?.shadowRoot?.querySelector("#root")?.classList.contains("ha3d-idle-xray") === true;
+  return Boolean(controllerActive || visualActive);
 }
 
 function telemetryState(panel) {
@@ -258,7 +260,7 @@ function start(panel){const st=telemetryState(panel),hud=ensureHud(panel);hud?.c
 function stop(panel){const st=telemetryState(panel);st.started=false;clearCallout(panel);ensureHud(panel)?.classList.remove("active");}
 function syncMode(panel){if(isXrayActive(panel))start(panel);else stop(panel);}
 
-function install(panel){if(!panel?.shadowRoot)return;ensureHud(panel);ensureWorldIndicator(panel);const root=panel.shadowRoot.querySelector("#root");if(!root)return;if(!root.__ha3dLiveTelemetryObserver){const observer=new MutationObserver(()=>syncMode(panel));observer.observe(root,{attributes:true,attributeFilter:["class"]});root.__ha3dLiveTelemetryObserver=observer;}const st=telemetryState(panel);if(!st.raf)st.raf=requestAnimationFrame((time)=>frame(panel,time));collectSamples(panel);syncMode(panel);}
+function install(panel){if(!panel?.shadowRoot)return;panel._ha3dScannerSync=()=>syncMode(panel);ensureHud(panel);ensureWorldIndicator(panel);const root=panel.shadowRoot.querySelector("#root");if(!root)return;if(!root.__ha3dLiveTelemetryObserver){const observer=new MutationObserver(()=>syncMode(panel));observer.observe(root,{attributes:true,attributeFilter:["class"]});root.__ha3dLiveTelemetryObserver=observer;}const st=telemetryState(panel);if(!st.raf)st.raf=requestAnimationFrame((time)=>frame(panel,time));collectSamples(panel);syncMode(panel);}
 function cleanup(panel){const st=telemetryState(panel);if(st.raf)cancelAnimationFrame(st.raf);if(st.passiveTimer)clearInterval(st.passiveTimer);if(st.hideTimer)clearTimeout(st.hideTimer);st.raf=0;st.passiveTimer=0;st.hideTimer=0;st.indicator?.parent?.remove(st.indicator);st.indicator=null;}
 function collectPanels(root,found=new Set()){if(!root?.querySelectorAll)return found;for(const element of root.querySelectorAll("*")){if(element.localName==="ha3d-panel")found.add(element);if(element.shadowRoot)collectPanels(element.shadowRoot,found);}return found;}
 function installOnExistingPanels(){for(const panel of collectPanels(document))install(panel);}

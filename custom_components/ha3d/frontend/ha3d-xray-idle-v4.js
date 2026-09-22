@@ -68,6 +68,7 @@ function markActivity(panel) {
 function idleAllowed(panel) {
   return Boolean(
     panel?.isConnected &&
+      panel._cinematicEnabled &&
       panel._model &&
       panel._camera &&
       panel._controls &&
@@ -283,6 +284,7 @@ function enterIdle(panel) {
   panel.shadowRoot?.querySelector("#viewsPanel")?.classList.remove("open");
   panel.shadowRoot?.querySelector("#scenePrefixMenu")?.classList.remove("open");
   panel.shadowRoot?.querySelector("#root")?.classList.add("ha3d-idle-xray");
+  queueMicrotask(() => panel._ha3dScannerSync?.());
 
   applyXray(panel, true);
   startIdleCamera(panel);
@@ -310,6 +312,7 @@ function stopIdle(panel) {
 
   panel._ha3dIdleActive = false;
   panel.shadowRoot?.querySelector("#root")?.classList.remove("ha3d-idle-xray");
+  queueMicrotask(() => panel._ha3dScannerSync?.());
   applyXray(panel, false);
 
   restoreIdleControls(panel);
