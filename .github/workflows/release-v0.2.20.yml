@@ -1,0 +1,19 @@
+name: Publish HA3D v0.2.20
+
+on:
+  push:
+    paths:
+      - '.github/workflows/release-v0.2.20.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish v0.2.20
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view v0.2.20 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create v0.2.20 --repo "$GITHUB_REPOSITORY" --target "a9ae554a65fa55895b53968f3d6c2906749cdac4" --title "HA3D v0.2.20" --notes "Organic telemetry refinement for X-Ray: anomaly callouts now persist longer, reappear at irregular intervals while the condition remains, use asymmetric pulse/flicker motion, and vary vertically/laterally around the tracked object. Adds a subtle 3D live-event log board positioned behind the apartment with only real bound-entity state/anomaly events. Keeps the Siri-blue/cyan visual language and uses red only for real anomalies. Rollback branch: pre-organic-telemetry-0.2.19."
