@@ -65,17 +65,12 @@ async function toggleUnboundVirtualLight(panel, id) {
   }
 }
 
-async function toggleVirtualLight(panel, id) {
+async function activateVirtualLightMarker(panel, id) {
   const config = virtualLightConfigs(panel).find((item) => item.id === id);
   if (!config) return;
-  const entityId = config.entity_id;
 
-  if (entityId && panel?._hass?.states?.[entityId]) {
-    try {
-      await panel._hass.callService("homeassistant", "toggle", { entity_id: entityId });
-    } catch (error) {
-      panel._setStatus?.(`Erro ao alternar ${entityId}: ${error.message || error}`);
-    }
+  if (config.entity_id && panel?._hass?.states?.[config.entity_id]) {
+    panel._openNativeMoreInfo?.(config.entity_id);
     return;
   }
 
@@ -97,12 +92,18 @@ function ensureMarker(panel, runtime) {
     marker.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      toggleVirtualLight(panel, runtime.config.id);
+      activateVirtualLightMarker(panel, runtime.config.id);
     });
     container.appendChild(marker);
     panel._ha3dVirtualLightMarkers.set(runtime.config.id, marker);
   }
   return marker;
+}
+
+function removeMarker(panel, id) {
+  const marker = panel?._ha3dVirtualLightMarkers?.get?.(id);
+  marker?.remove?.();
+  panel?._ha3dVirtualLightMarkers?.delete?.(id);
 }
 
 function removeStaleMarkers(panel, activeIds) {
@@ -122,6 +123,12 @@ function updateVirtualLightMarkers(panel) {
   const point = panel._ha3dVirtualLightMarkerPoint || (panel._ha3dVirtualLightMarkerPoint = new THREE.Vector3());
 
   for (const [id, runtime] of panel._ha3dVirtualLights.entries()) {
+    const config = virtualLightConfigs(panel).find((item) => item.id === id) || runtime.config;
+    if (config?.show_marker === false) {
+      removeMarker(panel, id);
+      continue;
+    }
+
     activeIds.add(id);
     const marker = ensureMarker(panel, runtime);
     if (!marker) continue;
@@ -135,7 +142,6 @@ function updateVirtualLightMarkers(panel) {
       marker.style.top = `${(-point.y * 0.5 + 0.5) * stage.clientHeight - 26}px`;
     }
 
-    const config = virtualLightConfigs(panel).find((item) => item.id === id) || runtime.config;
     const status = markerState(panel, config);
     marker.classList.toggle("on", status.on);
     marker.classList.toggle("unavailable", status.unavailable);
@@ -147,8 +153,8 @@ function updateVirtualLightMarkers(panel) {
   removeStaleMarkers(panel, activeIds);
 }
 
-if (!proto.__ha3dVirtualLightMarkersV1) {
-  proto.__ha3dVirtualLightMarkersV1 = true;
+if (!proto.__ha3dVirtualLightMarkersV2) {
+  proto.__ha3dVirtualLightMarkersV2 = true;
 
   const oldUpdateLightMarkers = proto._updateLightMarkers;
   proto._updateLightMarkers = function (...args) {
