@@ -40,6 +40,7 @@ import "./ha3d-virtual-light-options.js?v=virtual-light-options-1";
 import "./ha3d-virtual-light-markers.js?v=virtual-light-markers-2";
 import "./ha3d-virtual-light-effects.js?v=virtual-light-effects-1";
 import "./ha3d-virtual-light-cinematic.js?v=virtual-light-cinematic-2";
+import "./ha3d-scene-assets.js?v=scene-assets-1";
 import "./ha3d-robot-trackers.js?v=robot-trackers-9";
 import "./ha3d-robot-map-overlay.js?v=robot-map-overlay-5";
 import "./ha3d-robot-map-hotfix.js?v=robot-map-hotfix-1";
