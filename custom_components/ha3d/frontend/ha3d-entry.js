@@ -55,3 +55,4 @@ import "./ha3d-entity-aliases.js?v=entity-aliases-1";
 import "./ha3d-ipad-touch-guard.js?v=ipad-touch-guard-1";
 import "./ha3d-longpress-only.js?v=longpress-only-1";
 import "./ha3d-marker-proximity-slider.js?v=marker-proximity-1";
+import "./ha3d-binding-marker-refresh.js?v=binding-marker-refresh-1";
