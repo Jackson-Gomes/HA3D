@@ -38,12 +38,12 @@ function installSlider(panel) {
   row.id = "ha3dMarkerProximityRow";
   row.className = "ha3dRow";
   row.innerHTML = `
-    <label>Distância para exibir o ícone</label>
+    <label>Distância para exibir ícone e informações</label>
     <div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center">
       <input id="ha3dMarkerProximity" type="range" min="${MIN_FACTOR}" max="${MAX_FACTOR}" step="${STEP}">
       <output id="ha3dMarkerProximityOut" style="min-width:48px;text-align:right;font-size:11px;opacity:.78"></output>
     </div>
-    <span class="ha3dHint">Menor = precisa aproximar mais. Maior = o ícone aparece de mais longe.</span>
+    <span class="ha3dHint">Menor = precisa aproximar mais. Maior = ícone e valores dos sensores aparecem de mais longe.</span>
   `;
 
   const zoomRow = zoomOnly.closest?.(".ha3dRow") || zoomOnly.parentElement;
@@ -104,10 +104,10 @@ if (!proto.__ha3dMarkerProximitySliderV1) {
 
     try {
       await persistSlider(this, entityId, factor);
-      this._setStatus?.(`Binding salvo · ícone próximo em ${formatFactor(factor)}`);
+      this._setStatus?.(`Binding salvo · ícone e informações próximos em ${formatFactor(factor)}`);
     } catch (error) {
       console.error("[HA3D] marker proximity save failed", error);
-      this._setStatus?.(`Binding salvo, mas falhou proximidade do ícone: ${error.message || error}`);
+      this._setStatus?.(`Binding salvo, mas falhou proximidade do ícone/informações: ${error.message || error}`);
     }
     return result;
   };
