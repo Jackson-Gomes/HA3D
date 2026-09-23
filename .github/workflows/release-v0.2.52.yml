@@ -1,0 +1,59 @@
+name: Publish HA3D v0.2.52 long-press aliases touch guard
+
+on:
+  push:
+    paths:
+      - .github/workflows/release-v0.2.52.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify release contents
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          manifest=json.loads(Path('custom_components/ha3d/manifest.json').read_text())
+          assert manifest['version']=='0.2.52'
+          init=Path('custom_components/ha3d/__init__.py').read_text()
+          assert 'FRONTEND_VERSION = "0.2.52"' in init
+          assert 'HA3DEntityAliasesView' in init
+          entry=Path('custom_components/ha3d/frontend/ha3d-entry.js').read_text()
+          for marker in ['ha3d-entity-aliases.js?v=entity-aliases-1','ha3d-ipad-touch-guard.js?v=ipad-touch-guard-1','ha3d-longpress-only.js?v=longpress-only-1']:
+              assert marker in entry
+          alias_api=Path('custom_components/ha3d/entity_aliases.py').read_text()
+          assert '/api/ha3d/entity_aliases' in alias_api
+          store=Path('custom_components/ha3d/storage.py').read_text()
+          assert '"entity_aliases": {}' in store
+          PY
+      - name: Run validation
+        run: |
+          python -m compileall -q custom_components/ha3d
+          npm run check
+          npm test
+          python -m unittest discover -s tests -p 'test_*.py'
+      - name: Tag release
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a v0.2.52 -m "HA3D v0.2.52"
+          git push origin v0.2.52
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v0.2.52 --title "HA3D v0.2.52" --notes "Torna o long-press o único gesto de interação com geometria no modo normal: click simples e double-click deixam de selecionar/aproximar objetos. Mantém long-press para entrar no Editor travado com X-Ray. Adiciona Nome no HA3D por entity_id, persistido no Home Assistant sem alterar o entity_id real, usado nos nomes de marcadores e widgets. Adiciona proteção para iPad/iOS contra seleção acidental de texto e touch callout no viewer, preservando seleção e edição em inputs, textarea e select. A v0.2.51 permanece disponível como rollback."
