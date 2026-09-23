@@ -51,3 +51,6 @@ import "./ha3d-interaction-gestures.js?v=interaction-gestures-2";
 import "./ha3d-object-inspection.js?v=object-inspection-1";
 import "./ha3d-inspection-exit.js?v=inspection-exit-1";
 import "./ha3d-smart-picker.js?v=smart-picker-1";
+import "./ha3d-entity-aliases.js?v=entity-aliases-1";
+import "./ha3d-ipad-touch-guard.js?v=ipad-touch-guard-1";
+import "./ha3d-longpress-only.js?v=longpress-only-1";
