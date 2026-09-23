@@ -17,6 +17,19 @@ function advancedConfigForRoot(panel, root, entityId) {
     .find((config) => config?.entity_id === entityId) || null;
 }
 
+function findAnchor(panel, key, config = null) {
+  const wanted = String(config?.anchor || key || "").trim();
+  if (!wanted || !panel?._model) return null;
+  let found = null;
+  panel._model.traverse((object) => {
+    if (found) return;
+    const original = String(object?.userData?.ha3dOriginalNodeName || "").trim();
+    const current = String(object?.name || "").trim();
+    if (original === wanted || current === wanted) found = object;
+  });
+  return found;
+}
+
 function prioritizeRootForEntity(panel, root, entityId) {
   if (!root || !entityId || !panel?._objectsByEntity) return;
 
@@ -36,15 +49,49 @@ function prioritizeRootForEntity(panel, root, entityId) {
   panel._boundCount = panel._objectsByEntity.size;
 }
 
-function useVisualCenterForMarker(panel, binding, root, entityId) {
+function useVisualCenterForMarker(panel, binding, root, entityId, configOverride = null) {
   if (!binding || !root) return;
-  const config = advancedConfigForRoot(panel, root, entityId);
+  const config = configOverride || advancedConfigForRoot(panel, root, entityId);
   binding.anchor = root;
   // GLB pivots are often at 0,0,0 or at a parent origin. The editor marker
-  // renderer already understands ha3dAnchorBounds and projects the center of
-  // the object's world-space bounding box instead of the imported pivot.
+  // renderer understands ha3dAnchorBounds and projects the center of the
+  // object's world-space bounding box instead of the imported pivot.
   binding.ha3dAnchorBounds = true;
   binding.ha3dMarkerOffset = new THREE.Vector3(...(config?.marker_offset || [0, 0, 0]));
+}
+
+function rebuildMarkerSet(panel) {
+  panel._clearMarkers?.();
+  panel._bindModelLights?.();
+  panel._bindEntityLightMarkers?.();
+  panel._bindAdvancedMarkers?.();
+}
+
+function restorePersistedManualBindings(panel) {
+  if (!panel?._model) return;
+
+  // Important: logical roots and secondary assets are annotated by modules that
+  // finish after the base model loader. Re-index only now, when the same keys
+  // used by the editor are actually present in the runtime scene graph.
+  panel._indexBindings?.();
+  rebuildMarkerSet(panel);
+
+  // Reapply visual-center anchoring for every persisted advanced binding. This
+  // also restores markers that were visible immediately after Save but used to
+  // disappear after closing/reopening HA3D because startup indexed too early.
+  for (const [key, config] of Object.entries(panel._config?.advanced_bindings || {})) {
+    const entityId = String(config?.entity_id || "").trim();
+    if (!entityId) continue;
+    const root = findAnchor(panel, key, config);
+    if (!root) continue;
+    const binding = panel._lightBindings?.get?.(entityId);
+    if (binding) useVisualCenterForMarker(panel, binding, root, entityId, config);
+  }
+
+  panel._syncLightStates?.();
+  panel._updateLightMarkers?.();
+  const meta = panel.shadowRoot?.querySelector("#meta");
+  if (meta) meta.textContent = `${panel._lightBindings?.size || 0} vínculos`;
 }
 
 function rebuildMarkersForManualBinding(panel, root, entityId) {
@@ -54,11 +101,7 @@ function rebuildMarkersForManualBinding(panel, root, entityId) {
   // preserved, then make the freshly saved manual binding the primary anchor.
   panel._indexBindings?.();
   prioritizeRootForEntity(panel, root, entityId);
-
-  panel._clearMarkers?.();
-  panel._bindModelLights?.();
-  panel._bindEntityLightMarkers?.();
-  panel._bindAdvancedMarkers?.();
+  rebuildMarkerSet(panel);
 
   // A light may already have created its marker through LightNode mapping.
   // Manual binding still owns the marker position, so re-anchor it explicitly
@@ -72,8 +115,15 @@ function rebuildMarkersForManualBinding(panel, root, entityId) {
   if (meta) meta.textContent = `${panel._lightBindings?.size || 0} vínculos`;
 }
 
-if (!proto.__ha3dBindingMarkerRefreshV2) {
-  proto.__ha3dBindingMarkerRefreshV2 = true;
+if (!proto.__ha3dBindingMarkerRefreshV3) {
+  proto.__ha3dBindingMarkerRefreshV3 = true;
+
+  const oldLoadModel = proto._loadModel;
+  proto._loadModel = async function (...args) {
+    const result = await oldLoadModel?.apply(this, args);
+    restorePersistedManualBindings(this);
+    return result;
+  };
 
   const oldSaveEditorBinding = proto._saveEditorBinding;
   proto._saveEditorBinding = async function (...args) {
