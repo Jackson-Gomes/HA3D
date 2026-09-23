@@ -1,15 +1,14 @@
 import * as THREE from "https://esm.sh/three@0.180.0";
 
 // Keep the initial/default camera visually superior while avoiding OrbitControls
-// pole lock. A camera almost exactly over the Y axis (89°) barely moves during
-// azimuth rotation, and using Z as camera.up makes controls behave differently
-// from every other HA3D view. 84° + Y-up stays visually top-down but orbits
-// freely and consistently.
+// pole lock. 84° + Y-up stays visually top-down but orbits freely. Using a 90°
+// azimuth preserves the original screen orientation from the old Z-up preset:
+// world +X remains to the right and -Z remains toward the top of the screen.
 const Panel = customElements.get("ha3d-panel");
 if (!Panel) throw new Error("HA3D panel was not registered");
 
 const proto = Panel.prototype;
-const TOP_AZ_DEG = 0;
+const TOP_AZ_DEG = 90;
 const TOP_EL_DEG = 84;
 const TOP_DISTANCE = 1.48;
 const TOP_UP = [0, 1, 0];
@@ -32,8 +31,8 @@ function topViewFor(object) {
   return { position: position.toArray(), target: center.toArray(), up: TOP_UP };
 }
 
-if (!proto.__ha3dDefaultTopViewV2) {
-  proto.__ha3dDefaultTopViewV2 = true;
+if (!proto.__ha3dDefaultTopViewV3) {
+  proto.__ha3dDefaultTopViewV3 = true;
 
   const originalFit = proto._fit;
   proto._fit = function (object) {
