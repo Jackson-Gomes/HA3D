@@ -56,5 +56,5 @@ import "./ha3d-ipad-touch-guard.js?v=ipad-touch-guard-1";
 import "./ha3d-longpress-only.js?v=longpress-only-1";
 import "./ha3d-marker-proximity-slider.js?v=marker-proximity-1";
 import "./ha3d-binding-marker-refresh.js?v=binding-marker-refresh-3";
-import "./ha3d-sensor-values.js?v=sensor-values-1";
-import "./ha3d-view-zones.js?v=view-zones-1";
+import "./ha3d-floating-state-fix.js?v=floating-state-fix-1";
+import "./ha3d-bottom-view-hub.js?v=bottom-view-hub-1";
