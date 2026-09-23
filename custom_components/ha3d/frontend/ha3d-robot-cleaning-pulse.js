@@ -55,16 +55,42 @@ function xrayMaterial(opacity) {
   });
 }
 
-function makeEffect(panel, entry) {
-  const source = entry?.object || entry?.icon;
-  const radius = effectSize(panel, source);
-  const root = new THREE.Group();
-  root.name = `HA3D_RobotCleaningPulse_${entry?.config?.id || entry?.config?.name || "robot"}`;
-  root.visible = false;
-  root.userData.ha3dRobotCleaningEffect = true;
+function makeGeometryGhost(source) {
+  if (!source) return null;
+  const ghost = source.clone(true);
+  const materials = [];
 
-  // Simple ghost silhouette. It deliberately does not clone the user's GLB:
-  // this keeps the overlay lightweight and guarantees visibility through walls.
+  // The wrapper will receive the source world transform every frame. Reset only
+  // the cloned root transform so child transforms remain exactly as authored.
+  ghost.position.set(0, 0, 0);
+  ghost.quaternion.identity();
+  ghost.scale.set(1, 1, 1);
+  ghost.name = `HA3D_RobotCleaningGeometry_${source.name || "robot"}`;
+  ghost.userData.ha3dRobotCleaningEffect = true;
+  ghost.userData.ha3dEditorHelper = true;
+
+  ghost.traverse((node) => {
+    node.userData.ha3dRobotCleaningEffect = true;
+    node.userData.ha3dEditorHelper = true;
+    if (node.isLight) {
+      node.visible = false;
+      return;
+    }
+    if (!node.isMesh) return;
+    if (node.geometry?.clone) node.geometry = node.geometry.clone();
+    const material = xrayMaterial(0.26);
+    node.material = material;
+    node.castShadow = false;
+    node.receiveShadow = false;
+    node.frustumCulled = false;
+    node.renderOrder = 1800;
+    materials.push(material);
+  });
+
+  return materials.length ? { ghost, materials } : null;
+}
+
+function makeFallbackBody(radius, root) {
   const bodyMaterial = xrayMaterial(0.34);
   const body = new THREE.Mesh(
     new THREE.CylinderGeometry(radius, radius, Math.max(radius * 0.30, 0.012), 32),
@@ -73,6 +99,7 @@ function makeEffect(panel, entry) {
   body.position.y = Math.max(radius * 0.22, 0.01);
   body.renderOrder = 1800;
   body.userData.ha3dRobotCleaningEffect = true;
+  body.userData.ha3dEditorHelper = true;
   root.add(body);
 
   const coreMaterial = xrayMaterial(0.62);
@@ -83,9 +110,28 @@ function makeEffect(panel, entry) {
   core.position.y = Math.max(radius * 0.29, 0.012);
   core.renderOrder = 1801;
   core.userData.ha3dRobotCleaningEffect = true;
+  core.userData.ha3dEditorHelper = true;
   root.add(core);
+  return { bodyMaterial, coreMaterial };
+}
 
-  // Two expanding floor rings create a soft radar pulse.
+function makeEffect(panel, entry) {
+  const source = entry?.object || entry?.icon;
+  const radius = effectSize(panel, source);
+  const root = new THREE.Group();
+  root.name = `HA3D_RobotCleaningPulse_${entry?.config?.id || entry?.config?.name || "robot"}`;
+  root.visible = false;
+  root.userData.ha3dRobotCleaningEffect = true;
+  root.userData.ha3dEditorHelper = true;
+
+  let geometryGhost = null;
+  let fallback = null;
+  if (entry?.object) {
+    geometryGhost = makeGeometryGhost(entry.object);
+    if (geometryGhost) root.add(geometryGhost.ghost);
+  }
+  if (!geometryGhost) fallback = makeFallbackBody(radius, root);
+
   const ringGeometryA = new THREE.RingGeometry(radius * 1.10, radius * 1.18, 48);
   const ringGeometryB = new THREE.RingGeometry(radius * 1.10, radius * 1.18, 48);
   const ringMaterialA = xrayMaterial(0.30);
@@ -97,11 +143,10 @@ function makeEffect(panel, entry) {
     ring.position.y = Math.max(radius * 0.045, 0.002);
     ring.renderOrder = 1799;
     ring.userData.ha3dRobotCleaningEffect = true;
+    ring.userData.ha3dEditorHelper = true;
     root.add(ring);
   }
 
-  // Very subtle vertical beacon. It helps locate the vacuum under furniture,
-  // while remaining much dimmer than the floor pulse.
   const beamHeight = Math.max(radius * 2.8, (Number(panel?._modelScale) || 10) * 0.045);
   const beamMaterial = xrayMaterial(0.075);
   const beam = new THREE.Mesh(
@@ -111,6 +156,7 @@ function makeEffect(panel, entry) {
   beam.position.y = beamHeight * 0.5;
   beam.renderOrder = 1798;
   beam.userData.ha3dRobotCleaningEffect = true;
+  beam.userData.ha3dEditorHelper = true;
   root.add(beam);
 
   panel._scene?.add(root);
@@ -118,8 +164,9 @@ function makeEffect(panel, entry) {
     root,
     source,
     radius,
-    bodyMaterial,
-    coreMaterial,
+    geometryGhost,
+    bodyMaterial: fallback?.bodyMaterial || null,
+    coreMaterial: fallback?.coreMaterial || null,
     ringA,
     ringB,
     ringMaterialA,
@@ -168,11 +215,17 @@ function syncEffect(panel, entry, effect, now) {
   source.updateWorldMatrix?.(true, false);
   source.getWorldPosition(effect.root.position);
   source.getWorldQuaternion(effect.root.quaternion);
+  effect.root.scale.set(1, 1, 1);
+  if (effect.geometryGhost?.ghost) source.getWorldScale(effect.geometryGhost.ghost.scale);
 
   const seconds = now * 0.001;
   const wave = 0.5 + 0.5 * Math.sin(seconds * Math.PI * 1.35);
-  effect.bodyMaterial.opacity = 0.28 + wave * 0.10;
-  effect.coreMaterial.opacity = 0.54 + wave * 0.14;
+  if (effect.geometryGhost?.materials?.length) {
+    const opacity = 0.20 + wave * 0.16;
+    for (const material of effect.geometryGhost.materials) material.opacity = opacity;
+  }
+  if (effect.bodyMaterial) effect.bodyMaterial.opacity = 0.28 + wave * 0.10;
+  if (effect.coreMaterial) effect.coreMaterial.opacity = 0.54 + wave * 0.14;
   effect.beamMaterial.opacity = 0.045 + wave * 0.045;
 
   const pulse = (ring, material, phaseOffset) => {
@@ -214,8 +267,8 @@ function stopLoop(panel) {
   panel._ha3dRobotCleaningPulseRaf = 0;
 }
 
-if (!proto.__ha3dRobotCleaningPulseV1) {
-  proto.__ha3dRobotCleaningPulseV1 = true;
+if (!proto.__ha3dRobotCleaningPulseV2) {
+  proto.__ha3dRobotCleaningPulseV2 = true;
 
   const oldConnected = proto.connectedCallback;
   proto.connectedCallback = function (...args) {
