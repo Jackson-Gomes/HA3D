@@ -10,6 +10,15 @@ function labelFor(object) {
   return String(object?.userData?.ha3dOriginalNodeName || object?.userData?.ha3dSceneAssetName || object?.name || "").trim();
 }
 
+function isSpecialHelper(object) {
+  return Boolean(
+    object?.userData?.ha3dEditorHelper
+    || object?.userData?.ha3dVirtualLightId
+    || object?.userData?.ha3dFloatingWidgetId
+    || object?.userData?.ha3dRobotCalibration
+  );
+}
+
 function logicalRoot(panel, object) {
   if (!object) return null;
   if (object.userData?.ha3dLogicalRootObject) return object.userData.ha3dLogicalRootObject;
@@ -75,7 +84,8 @@ function candidateScore(candidate, firstDistance, depthWindow, sceneDiagonal) {
   const size = Math.min(2, (candidate.diagonal || 0) / Math.max(sceneDiagonal, 1e-6));
   const architecture = isArchitectureCandidate(candidate, sceneDiagonal) ? 1.15 : 0;
   const transparent = candidate.transparent ? 0.9 : 0;
-  const entityPriority = candidate.root?.userData?.ha3dEntityId || /^(light|switch|media_player|vacuum|climate|binary_sensor|sensor)\./.test(labelFor(candidate.root)) ? -0.18 : 0;
+  const label = labelFor(candidate.root);
+  const entityPriority = candidate.root?.userData?.ha3dEntityId || /^(light|switch|media_player|vacuum|climate|binary_sensor|sensor)\./.test(label) ? -0.18 : 0;
   return depth * 0.8 + size * 0.55 + architecture + transparent + entityPriority;
 }
 
@@ -126,7 +136,12 @@ function smartPick(panel, event) {
 
 if (!proto.__ha3dSmartPickerV1) {
   proto.__ha3dSmartPickerV1 = true;
+  const oldPickObject = proto._pickObject;
   proto._pickObject = function (event) {
+    if (this._editorMode) {
+      const special = oldPickObject?.call(this, event);
+      if (isSpecialHelper(special)) return special;
+    }
     return smartPick(this, event);
   };
 
