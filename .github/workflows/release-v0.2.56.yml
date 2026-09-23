@@ -1,0 +1,60 @@
+name: Publish HA3D v0.2.56 top view and binding restore
+
+on:
+  push:
+    paths:
+      - .github/workflows/release-v0.2.56.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify release contents
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          manifest=json.loads(Path('custom_components/ha3d/manifest.json').read_text())
+          assert manifest['version']=='0.2.56'
+          init=Path('custom_components/ha3d/__init__.py').read_text()
+          assert 'FRONTEND_VERSION = "0.2.56"' in init
+          entry=Path('custom_components/ha3d/frontend/ha3d-entry.js').read_text()
+          assert 'ha3d-default-top-view.js?v=default-top-2' in entry
+          assert 'ha3d-binding-marker-refresh.js?v=binding-marker-refresh-3' in entry
+          top=Path('custom_components/ha3d/frontend/ha3d-default-top-view.js').read_text()
+          for marker in ['TOP_EL_DEG = 84', 'TOP_UP = [0, 1, 0]', 'name !== "top"']:
+              assert marker in top
+          bindings=Path('custom_components/ha3d/frontend/ha3d-binding-marker-refresh.js').read_text()
+          for marker in ['restorePersistedManualBindings', 'const oldLoadModel = proto._loadModel', 'ha3dAnchorBounds = true']:
+              assert marker in bindings
+          PY
+      - name: Run validation
+        run: |
+          python -m compileall -q custom_components/ha3d
+          npm run check
+          npm test
+          python -m unittest discover -s tests -p 'test_*.py'
+      - name: Tag release
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a v0.2.56 -m "HA3D v0.2.56"
+          git push origin v0.2.56
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v0.2.56 --title "HA3D v0.2.56" --notes "Corrige dois pontos: a vista Padrão/Superior passa a usar 84 graus com Y-up, mantendo aparência superior mas liberando a órbita como nas demais vistas; e bindings manuais persistidos passam a ser reindexados e ter seus ícones reconstruídos somente depois que o modelo, raízes lógicas e assets terminam de carregar, evitando o ícone desaparecer ao fechar e reabrir o HA3D. O marcador continua usando o centro visual do objeto e preserva offset manual. A v0.2.55 permanece disponível como rollback."
