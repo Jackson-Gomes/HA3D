@@ -54,3 +54,4 @@ import "./ha3d-smart-picker.js?v=smart-picker-1";
 import "./ha3d-entity-aliases.js?v=entity-aliases-1";
 import "./ha3d-ipad-touch-guard.js?v=ipad-touch-guard-1";
 import "./ha3d-longpress-only.js?v=longpress-only-1";
+import "./ha3d-marker-proximity-slider.js?v=marker-proximity-1";
