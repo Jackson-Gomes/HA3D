@@ -22,6 +22,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "scene_assets": [],
     "floating_widgets": [],
     "entity_aliases": {},
+    "marker_proximity": {},
 }
 
 
@@ -42,6 +43,7 @@ class HA3DStore:
             self._data["scene_assets"] = list(stored.get("scene_assets", []))
             self._data["floating_widgets"] = list(stored.get("floating_widgets", []))
             self._data["entity_aliases"] = dict(stored.get("entity_aliases", {}))
+            self._data["marker_proximity"] = dict(stored.get("marker_proximity", {}))
         return deepcopy(self._data)
 
     async def async_update(self, changes: dict[str, Any]) -> dict[str, Any]:
