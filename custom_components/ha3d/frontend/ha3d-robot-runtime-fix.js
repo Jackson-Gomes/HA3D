@@ -10,9 +10,20 @@ if (!THREE) throw new Error("HA3D Three.js runtime was not registered");
 const proto = Panel.prototype;
 
 const MAP_ENTITY = "image.xiaomi_robot_vacuum_h50_live_map";
+const MAP_STORAGE_KEY = "ha3d_xiaomi_map_overlay_v1";
 
 function floorHeightAxis(plane = "xz") {
   return plane === "xy" ? "z" : plane === "yz" ? "x" : "y";
+}
+
+function mapVisibilityPreference(robotId) {
+  try {
+    const all = JSON.parse(localStorage.getItem(MAP_STORAGE_KEY) || "{}");
+    const value = all?.[robotId]?.visible;
+    return typeof value === "boolean" ? value : false;
+  } catch (_error) {
+    return false;
+  }
 }
 
 function enforceConfiguredRobotHeight(panel) {
@@ -39,10 +50,11 @@ function preserveLoadedMapOnTemporaryOutage(panel) {
   if (!unavailable) return;
   for (const entry of panel?._robotEntries?.values?.() || []) {
     const mesh = entry?.ha3dMapOverlay;
-    if (!mesh || !mesh.material?.map) continue;
-    // Keep last successfully loaded texture visible according to its existing
-    // visibility flag. Do not force it off just because HA missed one refresh.
-    mesh.visible = mesh.visible !== false;
+    const robotId = entry?.config?.id;
+    if (!mesh || !mesh.material?.map || !robotId) continue;
+    // The overlay module temporarily hides the plane when entity_picture drops.
+    // Restore the last successful texture only if the user asked for the map.
+    mesh.visible = mapVisibilityPreference(robotId);
   }
 }
 
