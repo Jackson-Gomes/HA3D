@@ -1,0 +1,56 @@
+name: Publish HA3D v0.2.55 marker visual center
+
+on:
+  push:
+    paths:
+      - .github/workflows/release-v0.2.55.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify release contents
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          manifest=json.loads(Path('custom_components/ha3d/manifest.json').read_text())
+          assert manifest['version']=='0.2.55'
+          init=Path('custom_components/ha3d/__init__.py').read_text()
+          assert 'FRONTEND_VERSION = "0.2.55"' in init
+          entry=Path('custom_components/ha3d/frontend/ha3d-entry.js').read_text()
+          assert 'ha3d-binding-marker-refresh.js?v=binding-marker-refresh-2' in entry
+          hotfix=Path('custom_components/ha3d/frontend/ha3d-binding-marker-refresh.js').read_text()
+          for marker in ['ha3dAnchorBounds = true', 'ha3dMarkerOffset', 'centro visual']:
+              assert marker in hotfix
+          PY
+      - name: Run validation
+        run: |
+          python -m compileall -q custom_components/ha3d
+          npm run check
+          npm test
+          python -m unittest discover -s tests -p 'test_*.py'
+      - name: Tag release
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+Jackson-Gomes@users.noreply.github.com"
+          git tag -a v0.2.55 -m "HA3D v0.2.55"
+          git push origin v0.2.55
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v0.2.55 --title "HA3D v0.2.55" --notes "Corrige a posição de ícones criados ou reancorados por bindings manuais. O marcador passa a usar o centro visual do bounding box do objeto em world space, em vez do pivot/origem importado do GLB, preservando qualquer offset manual já configurado. Mantém bindings, aliases, proximidade, long-press, robô e Cinematic inalterados. A v0.2.54 permanece disponível como rollback."
