@@ -17,6 +17,7 @@ from .const import (
     PANEL_URL_PATH,
     STATIC_URL,
 )
+from .entity_aliases import HA3DEntityAliasesView
 from .floating_widgets import HA3DFloatingWidgetsView
 from .http import HA3DAreasView, HA3DConfigView, HA3DModelUploadView
 from .scene_assets import HA3DSceneAssetUploadView, HA3DSceneAssetsView
@@ -24,7 +25,7 @@ from .storage import HA3DStore
 from .virtual_lights import HA3DVirtualLightsView
 
 
-FRONTEND_VERSION = "0.2.51"
+FRONTEND_VERSION = "0.2.52"
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -50,6 +51,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.http.register_view(HA3DSceneAssetsView(hass, store))
         hass.http.register_view(HA3DSceneAssetUploadView(hass, store))
         hass.http.register_view(HA3DFloatingWidgetsView(store))
+        hass.http.register_view(HA3DEntityAliasesView(store))
         runtime["http_registered"] = True
 
     model_path = Path(hass.config.path(MODEL_RELATIVE_PATH))
