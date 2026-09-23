@@ -6,7 +6,8 @@ if (!THREE) throw new Error("HA3D Three.js runtime was not registered");
 
 const proto = Panel.prototype;
 const CLEANING_STATE = "cleaning";
-const EFFECT_COLOR = 0x4de7ff;
+const NORMAL_COLOR = 0x4de7ff;
+const XRAY_COLOR = 0xff3b30;
 
 function disposeMaterial(material) {
   if (!material) return;
@@ -42,9 +43,9 @@ function effectSize(panel, source) {
   return fallback;
 }
 
-function xrayMaterial(opacity) {
+function xrayMaterial(opacity, color = NORMAL_COLOR) {
   return new THREE.MeshBasicMaterial({
-    color: EFFECT_COLOR,
+    color,
     transparent: true,
     opacity,
     depthTest: false,
@@ -55,38 +56,42 @@ function xrayMaterial(opacity) {
   });
 }
 
+function safeRenderableClone(source, materials) {
+  let copy;
+  if (source?.isMesh && source.geometry) {
+    copy = new THREE.Mesh(source.geometry.clone(), xrayMaterial(0.26));
+    materials.push(copy.material);
+    copy.castShadow = false;
+    copy.receiveShadow = false;
+    copy.frustumCulled = false;
+    copy.renderOrder = 1800;
+  } else {
+    copy = new THREE.Group();
+  }
+
+  copy.name = `HA3D_CleaningGhost_${source?.name || "node"}`;
+  copy.position.copy(source?.position || new THREE.Vector3());
+  copy.quaternion.copy(source?.quaternion || new THREE.Quaternion());
+  copy.scale.copy(source?.scale || new THREE.Vector3(1, 1, 1));
+  copy.visible = source?.visible !== false;
+  copy.userData.ha3dRobotCleaningEffect = true;
+  copy.userData.ha3dEditorHelper = true;
+
+  for (const child of source?.children || []) {
+    if (child?.userData?.ha3dRobotCleaningEffect || child?.isLight) continue;
+    copy.add(safeRenderableClone(child, materials));
+  }
+  return copy;
+}
+
 function makeGeometryGhost(source) {
   if (!source) return null;
-  const ghost = source.clone(true);
   const materials = [];
-
-  // The wrapper will receive the source world transform every frame. Reset only
-  // the cloned root transform so child transforms remain exactly as authored.
+  const ghost = safeRenderableClone(source, materials);
   ghost.position.set(0, 0, 0);
   ghost.quaternion.identity();
   ghost.scale.set(1, 1, 1);
   ghost.name = `HA3D_RobotCleaningGeometry_${source.name || "robot"}`;
-  ghost.userData.ha3dRobotCleaningEffect = true;
-  ghost.userData.ha3dEditorHelper = true;
-
-  ghost.traverse((node) => {
-    node.userData.ha3dRobotCleaningEffect = true;
-    node.userData.ha3dEditorHelper = true;
-    if (node.isLight) {
-      node.visible = false;
-      return;
-    }
-    if (!node.isMesh) return;
-    if (node.geometry?.clone) node.geometry = node.geometry.clone();
-    const material = xrayMaterial(0.26);
-    node.material = material;
-    node.castShadow = false;
-    node.receiveShadow = false;
-    node.frustumCulled = false;
-    node.renderOrder = 1800;
-    materials.push(material);
-  });
-
   return materials.length ? { ghost, materials } : null;
 }
 
@@ -172,6 +177,7 @@ function makeEffect(panel, entry) {
     ringMaterialA,
     ringMaterialB,
     beamMaterial,
+    lastColor: null,
   };
 }
 
@@ -206,6 +212,22 @@ function cleaningActive(panel, entry) {
   return state?.state === CLEANING_STATE && Boolean((entry.object || entry.icon)?.visible);
 }
 
+function cinematicXrayActive(panel) {
+  const root = panel?.shadowRoot?.querySelector("#root");
+  return Boolean(root?.classList?.contains("ha3d-idle-xray"));
+}
+
+function setEffectColor(effect, color) {
+  if (effect.lastColor === color) return;
+  effect.lastColor = color;
+  for (const material of effect.geometryGhost?.materials || []) material.color.setHex(color);
+  effect.bodyMaterial?.color?.setHex?.(color);
+  effect.coreMaterial?.color?.setHex?.(color);
+  effect.ringMaterialA?.color?.setHex?.(color);
+  effect.ringMaterialB?.color?.setHex?.(color);
+  effect.beamMaterial?.color?.setHex?.(color);
+}
+
 function syncEffect(panel, entry, effect, now) {
   const source = entry?.object || entry?.icon;
   const active = cleaningActive(panel, entry) && Boolean(source);
@@ -218,21 +240,26 @@ function syncEffect(panel, entry, effect, now) {
   effect.root.scale.set(1, 1, 1);
   if (effect.geometryGhost?.ghost) source.getWorldScale(effect.geometryGhost.ghost.scale);
 
+  const inCinematicXray = cinematicXrayActive(panel);
+  setEffectColor(effect, inCinematicXray ? XRAY_COLOR : NORMAL_COLOR);
+
   const seconds = now * 0.001;
-  const wave = 0.5 + 0.5 * Math.sin(seconds * Math.PI * 1.35);
+  const speed = inCinematicXray ? 2.35 : 1.35;
+  const wave = 0.5 + 0.5 * Math.sin(seconds * Math.PI * speed);
   if (effect.geometryGhost?.materials?.length) {
-    const opacity = 0.20 + wave * 0.16;
+    const opacity = inCinematicXray ? 0.36 + wave * 0.28 : 0.20 + wave * 0.16;
     for (const material of effect.geometryGhost.materials) material.opacity = opacity;
   }
-  if (effect.bodyMaterial) effect.bodyMaterial.opacity = 0.28 + wave * 0.10;
-  if (effect.coreMaterial) effect.coreMaterial.opacity = 0.54 + wave * 0.14;
-  effect.beamMaterial.opacity = 0.045 + wave * 0.045;
+  if (effect.bodyMaterial) effect.bodyMaterial.opacity = inCinematicXray ? 0.46 + wave * 0.25 : 0.28 + wave * 0.10;
+  if (effect.coreMaterial) effect.coreMaterial.opacity = inCinematicXray ? 0.72 + wave * 0.20 : 0.54 + wave * 0.14;
+  effect.beamMaterial.opacity = inCinematicXray ? 0.11 + wave * 0.11 : 0.045 + wave * 0.045;
 
   const pulse = (ring, material, phaseOffset) => {
-    const phase = (seconds * 0.48 + phaseOffset) % 1;
-    const scale = THREE.MathUtils.lerp(0.92, 2.15, phase);
+    const rate = inCinematicXray ? 0.78 : 0.48;
+    const phase = (seconds * rate + phaseOffset) % 1;
+    const scale = THREE.MathUtils.lerp(0.92, inCinematicXray ? 2.55 : 2.15, phase);
     ring.scale.setScalar(scale);
-    material.opacity = Math.max(0, (1 - phase) * 0.32);
+    material.opacity = Math.max(0, (1 - phase) * (inCinematicXray ? 0.58 : 0.32));
   };
   pulse(effect.ringA, effect.ringMaterialA, 0);
   pulse(effect.ringB, effect.ringMaterialB, 0.5);
@@ -240,12 +267,16 @@ function syncEffect(panel, entry, effect, now) {
 
 function syncAll(panel, now = performance.now()) {
   if (!panel?._scene) return;
-  ensureEffects(panel);
-  const entries = panel._robotObjects?.() || new Map();
-  for (const [key, entry] of entries.entries()) {
-    const effectKey = String(entry?.config?.id || key);
-    const effect = panel._ha3dRobotCleaningEffects?.get?.(effectKey);
-    if (effect) syncEffect(panel, entry, effect, now);
+  try {
+    ensureEffects(panel);
+    const entries = panel._robotObjects?.() || new Map();
+    for (const [key, entry] of entries.entries()) {
+      const effectKey = String(entry?.config?.id || key);
+      const effect = panel._ha3dRobotCleaningEffects?.get?.(effectKey);
+      if (effect) syncEffect(panel, entry, effect, now);
+    }
+  } catch (error) {
+    console.error("[HA3D] robot cleaning effect skipped", error);
   }
 }
 
@@ -267,8 +298,8 @@ function stopLoop(panel) {
   panel._ha3dRobotCleaningPulseRaf = 0;
 }
 
-if (!proto.__ha3dRobotCleaningPulseV2) {
-  proto.__ha3dRobotCleaningPulseV2 = true;
+if (!proto.__ha3dRobotCleaningPulseV3) {
+  proto.__ha3dRobotCleaningPulseV3 = true;
 
   const oldConnected = proto.connectedCallback;
   proto.connectedCallback = function (...args) {
