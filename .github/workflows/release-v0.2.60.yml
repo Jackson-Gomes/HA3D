@@ -1,0 +1,56 @@
+name: Publish HA3D v0.2.60 view zone xray fix
+
+on:
+  push:
+    paths:
+      - .github/workflows/release-v0.2.60.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify hotfix
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          manifest=json.loads(Path('custom_components/ha3d/manifest.json').read_text())
+          assert manifest['version']=='0.2.60'
+          init=Path('custom_components/ha3d/__init__.py').read_text()
+          assert 'FRONTEND_VERSION = "0.2.60"' in init
+          entry=Path('custom_components/ha3d/frontend/ha3d-entry.js').read_text()
+          assert 'ha3d-view-zone-xray-fix.js?v=view-zone-xray-fix-1' in entry
+          fix=Path('custom_components/ha3d/frontend/ha3d-view-zone-xray-fix.js').read_text()
+          for marker in ['ha3d-idle-xray', 'ha3d-cinematic-active', '_ha3dBottomViewZones', '_controls?.enabled === false']:
+              assert marker in fix
+          PY
+      - name: Run validation
+        run: |
+          python -m compileall -q custom_components/ha3d
+          npm run check
+          npm test
+          python -m unittest discover -s tests -p 'test_*.py'
+      - name: Tag release
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a v0.2.60 -m "HA3D v0.2.60"
+          git push origin v0.2.60
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v0.2.60 --title "HA3D v0.2.60" --notes "Corrige os atalhos retangulares de vistas que podiam parar de responder depois do ciclo X-Ray/Cinemático. O hit-test das zonas deixa de depender cegamente de flags internas residuais de câmera/cinemático e passa a respeitar o estado visual real do dashboard; animações realmente ativas continuam bloqueadas enquanto OrbitControls está desabilitado. Nenhuma configuração, posição ou tamanho das zonas é alterado. A v0.2.59 permanece como rollback estável."
