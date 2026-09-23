@@ -1,0 +1,61 @@
+name: Publish HA3D v0.2.58 sensor values and view zones
+
+on:
+  push:
+    paths:
+      - .github/workflows/release-v0.2.58.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify release contents
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          manifest=json.loads(Path('custom_components/ha3d/manifest.json').read_text())
+          assert manifest['version']=='0.2.58'
+          init=Path('custom_components/ha3d/__init__.py').read_text()
+          assert 'FRONTEND_VERSION = "0.2.58"' in init
+          entry=Path('custom_components/ha3d/frontend/ha3d-entry.js').read_text()
+          assert 'ha3d-sensor-values.js?v=sensor-values-1' in entry
+          assert 'ha3d-view-zones.js?v=view-zones-1' in entry
+          sensor=Path('custom_components/ha3d/frontend/ha3d-sensor-values.js').read_text()
+          assert 'ha3dSensorValue' in sensor and 'unit_of_measurement' in sensor
+          views=Path('custom_components/ha3d/frontend/ha3d-view-zones.js').read_text()
+          for marker in ['LONG_PRESS_MS = 620', 'quick_access', 'ha3dViewZoneId', 'Criar retângulo', 'Altura da zona']:
+              assert marker in views
+          proximity=Path('custom_components/ha3d/frontend/ha3d-marker-proximity-slider.js').read_text()
+          assert 'Distância para exibir ícone e informações' in proximity
+          PY
+      - name: Run validation
+        run: |
+          python -m compileall -q custom_components/ha3d
+          npm run check
+          npm test
+          python -m unittest discover -s tests -p 'test_*.py'
+      - name: Tag release
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a v0.2.58 -m "HA3D v0.2.58"
+          git push origin v0.2.58
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v0.2.58 --title "HA3D v0.2.58" --notes "Adiciona valores visíveis de sensores e leituras extras diretamente sob o marcador, obedecendo ao mesmo controle de proximidade do ícone. Centraliza o fluxo de vistas no menu Vistas: toque curto abre a vista marcada como acesso rápido (ou Padrão se nenhuma estiver marcada), long-press abre o menu completo, criação continua em Salvar vista atual e o atalho antigo é ocultado. Cada vista personalizada pode receber uma zona retangular no piso, desenhada por arraste, com controle de altura, X/Z, largura/profundidade e opção de mostrar/ocultar; mesmo oculta, a zona continua clicável para chamar a vista vinculada. A v0.2.57 permanece como rollback estável."
