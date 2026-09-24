@@ -1,0 +1,65 @@
+name: Publish HA3D WebXR beta 0.2.65-beta.2
+
+on:
+  push:
+    branches:
+      - feature/webxr
+    paths:
+      - .github/workflows/release-webxr-beta2.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify WebXR beta.2 wiring
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          manifest = json.loads(Path('custom_components/ha3d/manifest.json').read_text())
+          assert manifest['version'] == '0.2.65-beta.2'
+          init = Path('custom_components/ha3d/__init__.py').read_text()
+          assert 'FRONTEND_VERSION = "0.2.65-beta.2"' in init
+          entry = Path('custom_components/ha3d/frontend/ha3d-entry.js').read_text()
+          assert 'ha3d-webxr.js?v=webxr-2' in entry
+          xr = Path('custom_components/ha3d/frontend/ha3d-webxr.js').read_text()
+          for marker in ['VR exige HTTPS', 'WebXR indisponível', 'VR não suportado', 'XR bloqueado', 'Entrar no VR']:
+              assert marker in xr
+          assert 'navigator.xr.isSessionSupported' in xr
+          assert 'navigator.xr.requestSession' in xr
+          PY
+      - name: Run validation
+        run: |
+          python -m compileall -q custom_components/ha3d
+          npm run check
+          npm test
+          python -m unittest discover -s tests -p 'test_*.py'
+      - name: Tag beta
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a v0.2.65-beta.2 -m "HA3D v0.2.65-beta.2 WebXR diagnostics"
+          git push origin v0.2.65-beta.2
+      - name: Create prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v0.2.65-beta.2 \
+            --target "$GITHUB_SHA" \
+            --prerelease \
+            --title "HA3D v0.2.65-beta.2 · Meta Quest WebXR diagnostics" \
+            --notes "Segundo build experimental Meta Quest, ainda baseado diretamente na v0.2.59 estável. Corrige o beta.1 que escondia o botão quando WebXR não estava disponível ou quando isSessionSupported falhava. O botão XR agora fica sempre visível e informa o diagnóstico: Entrar no VR, VR exige HTTPS, WebXR indisponível, VR não suportado ou XR bloqueado por segurança/Permissions-Policy. Mantém immersive-vr, local-floor, hand-tracking opcional, foveation e isolamento da UI 2D durante a sessão. v0.2.59 permanece como rollback estável."
