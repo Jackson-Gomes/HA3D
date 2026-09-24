@@ -1,0 +1,66 @@
+name: Publish HA3D WebXR beta 0.2.65-beta.3
+
+on:
+  push:
+    branches:
+      - feature/webxr
+    paths:
+      - .github/workflows/release-webxr-beta3.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify WebXR beta.3 wiring
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          manifest = json.loads(Path('custom_components/ha3d/manifest.json').read_text())
+          assert manifest['version'] == '0.2.65-beta.3'
+          init = Path('custom_components/ha3d/__init__.py').read_text()
+          assert 'FRONTEND_VERSION = "0.2.65-beta.3"' in init
+          entry = Path('custom_components/ha3d/frontend/ha3d-entry.js').read_text()
+          assert entry.index('ha3d-webxr.js?v=webxr-3') < entry.index('ha3d-graphics.js?v=frontend-2')
+          xr = Path('custom_components/ha3d/frontend/ha3d-webxr.js').read_text()
+          assert 'import "./ha3d-panel.js";' in xr
+          assert 'position:absolute!important' in xr
+          assert 'z-index:2147483000!important' in xr
+          for marker in ['VR exige HTTPS', 'WebXR indisponível', 'VR não suportado', 'XR bloqueado', 'Entrar no VR']:
+              assert marker in xr
+          PY
+      - name: Run validation
+        run: |
+          python -m compileall -q custom_components/ha3d
+          npm run check
+          npm test
+          python -m unittest discover -s tests -p 'test_*.py'
+      - name: Tag beta
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a v0.2.65-beta.3 -m "HA3D v0.2.65-beta.3 WebXR launcher isolation"
+          git push origin v0.2.65-beta.3
+      - name: Create prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v0.2.65-beta.3 \
+            --target "$GITHUB_SHA" \
+            --prerelease \
+            --title "HA3D v0.2.65-beta.3 · Meta Quest WebXR launcher isolation" \
+            --notes "Terceiro build experimental Meta Quest, ainda baseado na v0.2.59 estável. O WebXR agora carrega antes dos módulos auxiliares, importa o ha3d-panel diretamente e usa um launcher flutuante próprio com z-index alto, independente da topbar do HA3D. Isso evita que falhas ou estilos de módulos posteriores impeçam o diagnóstico XR de aparecer. O botão informa Entrar no VR, VR exige HTTPS, WebXR indisponível, VR não suportado ou XR bloqueado. v0.2.59 permanece como rollback estável."
