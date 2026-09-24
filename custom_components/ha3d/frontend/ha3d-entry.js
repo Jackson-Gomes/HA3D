@@ -58,4 +58,4 @@ import "./ha3d-marker-proximity-slider.js?v=marker-proximity-1";
 import "./ha3d-binding-marker-refresh.js?v=binding-marker-refresh-3";
 import "./ha3d-floating-state-fix.js?v=floating-state-fix-1";
 import "./ha3d-bottom-view-hub.js?v=bottom-view-hub-1";
-import "./ha3d-webxr.js?v=webxr-1";
+import "./ha3d-webxr.js?v=webxr-2";
