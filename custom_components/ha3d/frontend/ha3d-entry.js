@@ -1,6 +1,7 @@
 // Stable HA3D frontend entrypoint.
 // Frontend-only changes can be picked up with Redownload + app/page reload;
 // changing dependency query tokens does not require re-registering the HA panel.
+import "./ha3d-webxr.js?v=webxr-3";
 import "./ha3d-graphics.js?v=frontend-2";
 import "./ha3d-scene.js?v=frontend-2";
 import "./ha3d-entity-markers.js?v=entity-markers-3";
@@ -58,4 +59,3 @@ import "./ha3d-marker-proximity-slider.js?v=marker-proximity-1";
 import "./ha3d-binding-marker-refresh.js?v=binding-marker-refresh-3";
 import "./ha3d-floating-state-fix.js?v=floating-state-fix-1";
 import "./ha3d-bottom-view-hub.js?v=bottom-view-hub-1";
-import "./ha3d-webxr.js?v=webxr-2";
