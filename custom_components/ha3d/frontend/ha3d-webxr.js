@@ -97,6 +97,25 @@ function scheduleXRInstall(panel) {
   setTimeout(install, 1000);
 }
 
+function collectHa3dPanels(root, found = new Set()) {
+  if (!root) return found;
+  if (root.localName === "ha3d-panel") found.add(root);
+  if (!root.querySelectorAll) return found;
+
+  for (const element of root.querySelectorAll("*")) {
+    if (element.localName === "ha3d-panel") found.add(element);
+    if (element.shadowRoot) collectHa3dPanels(element.shadowRoot, found);
+  }
+  return found;
+}
+
+function installOnExistingPanels() {
+  for (const panel of collectHa3dPanels(document)) {
+    ensureXRState(panel);
+    scheduleXRInstall(panel);
+  }
+}
+
 function captureXRRestore(panel) {
   return {
     cameraPosition: panel._camera?.position?.clone?.(),
@@ -148,8 +167,8 @@ function pauseDesktopCameraSystems(panel) {
   }
 }
 
-if (!proto.__ha3dWebXRPatchedV3) {
-  proto.__ha3dWebXRPatchedV3 = true;
+if (!proto.__ha3dWebXRPatchedV4) {
+  proto.__ha3dWebXRPatchedV4 = true;
 
   const originalConnectedCallback = proto.connectedCallback;
   proto.connectedCallback = function () {
@@ -295,3 +314,13 @@ if (!proto.__ha3dWebXRPatchedV3) {
     }
   };
 }
+
+// Home Assistant can upgrade <ha3d-panel> synchronously while ha3d-panel.js is
+// imported, before this module gets a chance to patch connectedCallback. Apply
+// XR to any panel instance that is already alive, including panels nested in
+// Home Assistant shadow roots.
+queueMicrotask(installOnExistingPanels);
+requestAnimationFrame(installOnExistingPanels);
+setTimeout(installOnExistingPanels, 250);
+setTimeout(installOnExistingPanels, 1000);
+setTimeout(installOnExistingPanels, 2500);
