@@ -1,7 +1,7 @@
 // Stable HA3D frontend entrypoint.
 // Frontend-only changes can be picked up with Redownload + app/page reload;
 // changing dependency query tokens does not require re-registering the HA panel.
-import "./ha3d-webxr.js?v=webxr-3";
+import "./ha3d-webxr.js?v=webxr-4";
 import "./ha3d-graphics.js?v=frontend-2";
 import "./ha3d-scene.js?v=frontend-2";
 import "./ha3d-entity-markers.js?v=entity-markers-3";
@@ -37,10 +37,10 @@ import "./ha3d-editor-gizmo-persistence-fix.js?v=editor-gizmo-persistence-2";
 import "./ha3d-binding-editor-override.js?v=binding-editor-override-1";
 import "./ha3d-virtual-lights.js?v=virtual-lights-1";
 import "./ha3d-virtual-lights-api-adapter.js?v=virtual-lights-api-1";
-import "./ha3d-virtual-light-options.js?v=virtual-light-options-1";
-import "./ha3d-virtual-light-markers.js?v=virtual-light-markers-2";
-import "./ha3d-virtual-light-effects.js?v=virtual-light-effects-1";
-import "./ha3d-virtual-light-cinematic.js?v=virtual-light-cinematic-2";
+import "./ha3d-virtual-light-options.js?v=virtual-lights-options-1";
+import "./ha3d-virtual-light-markers.js?v=virtual-lights-markers-2";
+import "./ha3d-virtual-light-effects.js?v=virtual-lights-effects-1";
+import "./ha3d-virtual-light-cinematic.js?v=virtual-lights-cinematic-2";
 import "./ha3d-scene-assets.js?v=scene-assets-1";
 import "./ha3d-robot-trackers.js?v=robot-trackers-9";
 import "./ha3d-robot-map-overlay.js?v=robot-map-overlay-5";
