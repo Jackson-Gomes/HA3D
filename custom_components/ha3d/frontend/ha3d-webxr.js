@@ -4,7 +4,10 @@ const Panel = customElements.get("ha3d-panel");
 if (!Panel) throw new Error("HA3D panel was not registered");
 
 const proto = Panel.prototype;
-const XR_SESSION_MODE = "immersive-vr";
+const XR_SESSION_MODE = "immersive-ar";
+const XR_MODEL_TARGET_SIZE = 1.0;
+const XR_MODEL_CENTER_Y = 1.0;
+const XR_MODEL_DISTANCE = 1.25;
 
 function ensureXRState(panel) {
   if (panel._ha3dXRReady) return;
@@ -125,6 +128,10 @@ function captureXRRestore(panel) {
     controlsEnabled: panel._controls?.enabled,
     controlsDamping: panel._controls?.enableDamping,
     cameraAnimating: Boolean(panel._cameraAnimating),
+    sceneBackground: panel._scene?.background ?? null,
+    modelPosition: panel._model?.position?.clone?.(),
+    modelQuaternion: panel._model?.quaternion?.clone?.(),
+    modelScale: panel._model?.scale?.clone?.(),
   };
 }
 
@@ -143,7 +150,43 @@ function restoreDesktopCamera(panel) {
     panel._controls.update?.();
   }
   panel._cameraAnimating = state.cameraAnimating;
+  if (panel._scene) panel._scene.background = state.sceneBackground;
+  if (panel._model) {
+    if (state.modelPosition) panel._model.position.copy(state.modelPosition);
+    if (state.modelQuaternion) panel._model.quaternion.copy(state.modelQuaternion);
+    if (state.modelScale) panel._model.scale.copy(state.modelScale);
+    panel._model.updateMatrixWorld?.(true);
+  }
+  panel._renderer?.setClearAlpha?.(1);
   panel._ha3dXRRestore = null;
+}
+
+function prepareARModel(panel) {
+  if (!panel._model || !panel._scene) return;
+  panel._scene.background = null;
+  panel._renderer?.setClearAlpha?.(0);
+
+  // Keep Quest tracking in real-world meters; only scale/reposition the digital twin.
+  panel._model.position.set(0, 0, 0);
+  panel._model.quaternion.identity();
+  panel._model.scale.set(1, 1, 1);
+  panel._model.updateMatrixWorld(true);
+
+  const box = new THREE.Box3().setFromObject(panel._model);
+  const size = box.getSize(new THREE.Vector3());
+  const maxSize = Math.max(size.x, size.y, size.z) || 1;
+  const scale = XR_MODEL_TARGET_SIZE / maxSize;
+  panel._model.scale.setScalar(scale);
+  panel._model.updateMatrixWorld(true);
+
+  const scaledBox = new THREE.Box3().setFromObject(panel._model);
+  const center = scaledBox.getCenter(new THREE.Vector3());
+  panel._model.position.add(new THREE.Vector3(
+    -center.x,
+    XR_MODEL_CENTER_Y - center.y,
+    -XR_MODEL_DISTANCE - center.z
+  ));
+  panel._model.updateMatrixWorld(true);
 }
 
 function pauseDesktopCameraSystems(panel) {
@@ -202,7 +245,7 @@ if (!proto.__ha3dWebXRPatchedV4) {
       this._ha3dXRSupport = false;
       setXRButton(this, {
         enabled: false,
-        text: "VR exige HTTPS",
+        text: "AR exige HTTPS",
         state: "warning",
         detail: `WebXR requer HTTPS. Origem: ${location.origin}`,
       });
@@ -224,8 +267,8 @@ if (!proto.__ha3dWebXRPatchedV4) {
       const supported = await navigator.xr.isSessionSupported(XR_SESSION_MODE);
       this._ha3dXRSupport = Boolean(supported);
       setXRButton(this, supported
-        ? { enabled: true, text: "Entrar no VR", state: "ready", detail: "WebXR immersive-vr disponível" }
-        : { enabled: false, text: "VR não suportado", state: "warning", detail: "immersive-vr retornou false" });
+        ? { enabled: true, text: "Entrar em AR", state: "ready", detail: "WebXR immersive-ar + passthrough disponível" }
+        : { enabled: false, text: "AR não suportada", state: "warning", detail: "immersive-ar retornou false" });
       return supported;
     } catch (error) {
       console.warn("[HA3D XR] support probe failed", error);
@@ -237,7 +280,7 @@ if (!proto.__ha3dWebXRPatchedV4) {
         state: "error",
         detail: blocked
           ? "Bloqueado por segurança/Permissions-Policy xr-spatial-tracking"
-          : `Falha ao verificar immersive-vr: ${error?.name || "erro"}`,
+          : `Falha ao verificar immersive-ar: ${error?.name || "erro"}`,
       });
       return false;
     }
@@ -258,18 +301,19 @@ if (!proto.__ha3dWebXRPatchedV4) {
     try {
       setXRButton(this, {
         enabled: false,
-        text: "Abrindo VR…",
+        text: "Abrindo AR…",
         state: "warning",
-        detail: "Solicitando immersive-vr ao Meta Quest Browser",
+        detail: "Solicitando immersive-ar com passthrough ao Meta Quest Browser",
       });
 
       const session = await navigator.xr.requestSession(XR_SESSION_MODE, {
         requiredFeatures: ["local-floor"],
-        optionalFeatures: ["bounded-floor", "hand-tracking", "layers"],
+        optionalFeatures: ["bounded-floor", "hand-tracking", "plane-detection", "anchors", "layers"],
       });
 
       this._ha3dXRSession = session;
       pauseDesktopCameraSystems(this);
+      prepareARModel(this);
       this._ha3dXRPresenting = true;
       this.shadowRoot?.querySelector("#root")?.classList.add("ha3d-xr-presenting");
       this.shadowRoot?.querySelector("#viewsPanel")?.classList.remove("open");
@@ -280,7 +324,7 @@ if (!proto.__ha3dWebXRPatchedV4) {
       await this._renderer.xr.setSession(session);
       this._renderer.xr.setFoveation?.(0.65);
 
-      setXRButton(this, { enabled: true, text: "Sair do VR", state: "ready", detail: "Sessão WebXR ativa" });
+      setXRButton(this, { enabled: true, text: "Sair da AR", state: "ready", detail: "Sessão WebXR ativa" });
 
       session.addEventListener("end", () => {
         this._ha3dXRSession = null;
@@ -288,7 +332,7 @@ if (!proto.__ha3dWebXRPatchedV4) {
         this.shadowRoot?.querySelector("#root")?.classList.remove("ha3d-xr-presenting");
         restoreDesktopCamera(this);
         this._ha3dIdleLastActivity = Date.now();
-        setXRButton(this, { enabled: true, text: "Entrar no VR", state: "ready", detail: "WebXR immersive-vr disponível" });
+        setXRButton(this, { enabled: true, text: "Entrar em AR", state: "ready", detail: "WebXR immersive-ar disponível" });
       }, { once: true });
     } catch (error) {
       console.error("[HA3D XR] session failed", error);
@@ -297,11 +341,11 @@ if (!proto.__ha3dWebXRPatchedV4) {
       this.shadowRoot?.querySelector("#root")?.classList.remove("ha3d-xr-presenting");
       restoreDesktopCamera(this);
 
-      let message = "Falha ao abrir VR";
+      let message = "Falha ao abrir AR";
       let detail = `requestSession falhou: ${error?.name || "erro"}`;
       if (error?.name === "NotSupportedError") {
-        message = "VR não suportado";
-        detail = "O navegador recusou immersive-vr ou algum recurso obrigatório";
+        message = "AR não suportada";
+        detail = "O navegador recusou immersive-ar ou o recurso local-floor";
       } else if (error?.name === "SecurityError") {
         message = "XR bloqueado";
         detail = "Bloqueado por segurança/Permissions-Policy xr-spatial-tracking";
