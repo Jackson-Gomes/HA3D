@@ -60,4 +60,4 @@ import "./ha3d-binding-marker-refresh.js?v=binding-marker-refresh-3";
 import "./ha3d-floating-state-fix.js?v=floating-state-fix-1";
 import "./ha3d-bottom-view-hub.js?v=bottom-view-hub-1";
 import "./ha3d-webxr-ar-v3.js?v=ar-v3-1";
-import "./ha3d-webxr-ar-tabletop-fix.js?v=tabletop-fix-2";
+import "./ha3d-webxr-ar-tabletop-fix.js?v=tabletop-fix-3";
