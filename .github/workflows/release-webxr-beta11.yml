@@ -1,0 +1,86 @@
+name: Publish HA3D WebXR beta 0.2.65-beta.11
+
+on:
+  push:
+    branches:
+      - feature/webxr
+    paths:
+      - .github/workflows/release-webxr-beta11.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify Quest AR beta.11 wiring
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          manifest = json.loads(Path('custom_components/ha3d/manifest.json').read_text())
+          assert manifest['version'] == '0.2.65-beta.11'
+          init = Path('custom_components/ha3d/__init__.py').read_text()
+          assert 'FRONTEND_VERSION = "0.2.65-beta.11"' in init
+          entry = Path('custom_components/ha3d/frontend/ha3d-entry.js').read_text()
+          assert 'ha3d-webxr-ar-v3.js?v=ar-v3-1' in entry
+          assert 'ha3d-webxr-ar-tabletop-fix.js?v=tabletop-fix-3' in entry
+
+          ar = Path('custom_components/ha3d/frontend/ha3d-webxr-ar-v3.js').read_text()
+          for marker in [
+              'immersive-ar',
+              'plane-detection',
+              'hand-tracking',
+              'requestPersistentHandle',
+              'restorePersistentAnchor',
+              'initiateRoomCapture',
+          ]:
+              assert marker in ar, marker
+
+          fix = Path('custom_components/ha3d/frontend/ha3d-webxr-ar-tabletop-fix.js').read_text()
+          for marker in [
+              'DISTANCE_FROM_VIEWER_METERS = 0.75',
+              'CENTER_BELOW_EYES_METERS = 0.05',
+              'AR_EXPOSURE = 0.55',
+              'updateBetterGrab',
+              'Translation-only single-hand grab',
+              'updateXRIconPositions',
+              'raycastXRIcon',
+              'activateEntity',
+              '__ha3dARTabletopViewerFixV3',
+          ]:
+              assert marker in fix, marker
+          PY
+      - name: Run validation
+        run: |
+          python -m compileall -q custom_components/ha3d
+          npm run check
+          npm test
+          python -m unittest discover -s tests -p 'test_*.py'
+      - name: Tag beta
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a v0.2.65-beta.11 -m "HA3D v0.2.65-beta.11 Quest AR controls and icons"
+          git push origin v0.2.65-beta.11
+      - name: Create prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v0.2.65-beta.11 \
+            --target "$GITHUB_SHA" \
+            --prerelease \
+            --title "HA3D v0.2.65-beta.11 · Quest AR controls + icons" \
+            --notes "Ajusta a experiência no Meta Quest após o teste real da beta.10. A maquete agora nasce sempre relativa à pose atual do observador, cerca de 0,75 m à frente e praticamente na altura dos olhos, descartando anchors antigos no início de cada sessão. O controle com uma mão foi refeito para mover somente pela translação do controle, eliminando o efeito de a maquete girar/orbitar quando o pulso roda; duas mãos continuam permitindo escala e rotação. O AR também reduz a exposição do renderer para 0,55 para evitar materiais estourados e restaura a exposição ao sair. Adiciona marcadores 3D próprios dentro do WebXR, visíveis no headset, com acionamento direto por raio para luzes, switches, input_boolean, botões, scripts e media_player. main e v0.2.59 permanecem intactas."
