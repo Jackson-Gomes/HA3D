@@ -1,3 +1,5 @@
+import "./ha3d-panel.js";
+
 const Panel = customElements.get("ha3d-panel");
 if (!Panel) throw new Error("HA3D panel was not registered");
 
@@ -11,7 +13,7 @@ function ensureXRState(panel) {
   panel._ha3dXRSession = null;
   panel._ha3dXRSupport = null;
   panel._ha3dXRRestore = null;
-  panel._ha3dXRDiagnostic = "Inicializando WebXR";
+  panel._ha3dXRDiagnostic = "XR carregado";
 }
 
 function installXRStyle(panel) {
@@ -19,23 +21,44 @@ function installXRStyle(panel) {
   const style = document.createElement("style");
   style.id = "ha3dWebXRStyle";
   style.textContent = `
-    #xrButton{display:inline-flex;align-items:center;justify-content:center;gap:7px;background:#2b2e35}
-    #xrButton.ha3d-xr-ready{background:#183f68}
-    #xrButton.ha3d-xr-warning{background:#493b22;color:#fff3c2}
-    #xrButton.ha3d-xr-error{background:#552828;color:#ffd1d1}
+    #xrButton{
+      position:absolute!important;
+      top:max(14px,env(safe-area-inset-top))!important;
+      right:max(14px,env(safe-area-inset-right))!important;
+      z-index:2147483000!important;
+      display:inline-flex!important;
+      align-items:center!important;
+      justify-content:center!important;
+      min-height:42px!important;
+      padding:10px 14px!important;
+      border-radius:13px!important;
+      border:1px solid rgba(255,255,255,.22)!important;
+      box-shadow:0 7px 28px rgba(0,0,0,.42)!important;
+      backdrop-filter:blur(10px);
+      -webkit-backdrop-filter:blur(10px);
+      opacity:1!important;
+      pointer-events:auto!important;
+      font:600 13px system-ui,sans-serif!important;
+      color:#fff!important;
+      background:#493b22!important;
+    }
+    #xrButton.ha3d-xr-ready{background:#164d7b!important}
+    #xrButton.ha3d-xr-warning{background:#493b22!important;color:#fff3c2!important}
+    #xrButton.ha3d-xr-error{background:#682f2f!important;color:#ffe1e1!important}
     #root.ha3d-xr-presenting > :not(#stage){opacity:0!important;pointer-events:none!important}
     #root.ha3d-xr-presenting #stage{inset:0!important}
   `;
   panel.shadowRoot.appendChild(style);
 }
 
-function setXRButton(panel, { enabled = false, text = "VR", state = "warning", detail = "" } = {}) {
+function setXRButton(panel, { enabled = false, text = "XR", state = "warning", detail = "" } = {}) {
   const button = panel.shadowRoot?.querySelector("#xrButton");
   if (!button) return;
   panel._ha3dXRDiagnostic = detail || text;
   button.textContent = text;
   button.disabled = !enabled;
   button.title = detail || text;
+  button.setAttribute("aria-label", detail || text);
   button.dataset.xrState = state;
   button.classList.toggle("ha3d-xr-ready", state === "ready");
   button.classList.toggle("ha3d-xr-warning", state === "warning");
@@ -45,22 +68,33 @@ function setXRButton(panel, { enabled = false, text = "VR", state = "warning", d
 function installXRButton(panel) {
   ensureXRState(panel);
   installXRStyle(panel);
-  if (!panel.shadowRoot || panel.shadowRoot.querySelector("#xrButton")) return;
+  if (!panel.shadowRoot) return false;
 
-  const actions = panel.shadowRoot.querySelector("#actions");
-  if (!actions) return;
-
-  const button = document.createElement("button");
-  button.id = "xrButton";
-  button.type = "button";
-  button.className = "secondary ha3d-xr-warning";
-  button.textContent = "XR verificando…";
-  button.title = "Verificando suporte WebXR";
-  button.disabled = true;
-  button.addEventListener("click", () => panel._ha3dToggleXR?.());
-  actions.prepend(button);
+  let button = panel.shadowRoot.querySelector("#xrButton");
+  if (!button) {
+    const root = panel.shadowRoot.querySelector("#root");
+    if (!root) return false;
+    button = document.createElement("button");
+    button.id = "xrButton";
+    button.type = "button";
+    button.className = "ha3d-xr-warning";
+    button.textContent = "XR carregado";
+    button.title = "Módulo WebXR do HA3D carregado";
+    button.disabled = true;
+    button.addEventListener("click", () => panel._ha3dToggleXR?.());
+    root.appendChild(button);
+  }
 
   panel._ha3dProbeXR?.();
+  return true;
+}
+
+function scheduleXRInstall(panel) {
+  const install = () => installXRButton(panel);
+  queueMicrotask(install);
+  requestAnimationFrame(install);
+  setTimeout(install, 250);
+  setTimeout(install, 1000);
 }
 
 function captureXRRestore(panel) {
@@ -114,21 +148,22 @@ function pauseDesktopCameraSystems(panel) {
   }
 }
 
-if (!proto.__ha3dWebXRPatchedV2) {
-  proto.__ha3dWebXRPatchedV2 = true;
+if (!proto.__ha3dWebXRPatchedV3) {
+  proto.__ha3dWebXRPatchedV3 = true;
 
   const originalConnectedCallback = proto.connectedCallback;
   proto.connectedCallback = function () {
     ensureXRState(this);
-    originalConnectedCallback.call(this);
-    queueMicrotask(() => installXRButton(this));
+    const result = originalConnectedCallback.call(this);
+    scheduleXRInstall(this);
+    return result;
   };
 
   const originalDisconnectedCallback = proto.disconnectedCallback;
   proto.disconnectedCallback = function () {
     const session = this._ha3dXRSession;
     this._ha3dXRSession = null;
-    if (session && session.end) session.end().catch?.(() => {});
+    if (session?.end) session.end().catch?.(() => {});
     return originalDisconnectedCallback?.call(this);
   };
 
@@ -150,9 +185,8 @@ if (!proto.__ha3dWebXRPatchedV2) {
         enabled: false,
         text: "VR exige HTTPS",
         state: "warning",
-        detail: `WebXR requer contexto seguro. Origem atual: ${location.origin}`,
+        detail: `WebXR requer HTTPS. Origem: ${location.origin}`,
       });
-      console.warn("[HA3D XR] insecure context", location.origin);
       return false;
     }
 
@@ -164,39 +198,26 @@ if (!proto.__ha3dWebXRPatchedV2) {
         state: "error",
         detail: "navigator.xr não está disponível neste contexto do navegador",
       });
-      console.warn("[HA3D XR] navigator.xr unavailable", navigator.userAgent);
       return false;
     }
 
     try {
       const supported = await navigator.xr.isSessionSupported(XR_SESSION_MODE);
       this._ha3dXRSupport = Boolean(supported);
-      if (supported) {
-        setXRButton(this, {
-          enabled: true,
-          text: "Entrar no VR",
-          state: "ready",
-          detail: "WebXR immersive-vr disponível",
-        });
-      } else {
-        setXRButton(this, {
-          enabled: false,
-          text: "VR não suportado",
-          state: "warning",
-          detail: "navigator.xr existe, mas immersive-vr retornou false",
-        });
-      }
+      setXRButton(this, supported
+        ? { enabled: true, text: "Entrar no VR", state: "ready", detail: "WebXR immersive-vr disponível" }
+        : { enabled: false, text: "VR não suportado", state: "warning", detail: "immersive-vr retornou false" });
       return supported;
     } catch (error) {
       console.warn("[HA3D XR] support probe failed", error);
       this._ha3dXRSupport = false;
-      const securityBlocked = error?.name === "SecurityError";
+      const blocked = error?.name === "SecurityError";
       setXRButton(this, {
         enabled: false,
-        text: securityBlocked ? "XR bloqueado" : "Erro WebXR",
+        text: blocked ? "XR bloqueado" : "Erro WebXR",
         state: "error",
-        detail: securityBlocked
-          ? "WebXR foi bloqueado por segurança/Permissions-Policy (xr-spatial-tracking)"
+        detail: blocked
+          ? "Bloqueado por segurança/Permissions-Policy xr-spatial-tracking"
           : `Falha ao verificar immersive-vr: ${error?.name || "erro"}`,
       });
       return false;
@@ -220,7 +241,7 @@ if (!proto.__ha3dWebXRPatchedV2) {
         enabled: false,
         text: "Abrindo VR…",
         state: "warning",
-        detail: "Solicitando sessão immersive-vr ao Meta Quest Browser",
+        detail: "Solicitando immersive-vr ao Meta Quest Browser",
       });
 
       const session = await navigator.xr.requestSession(XR_SESSION_MODE, {
@@ -240,12 +261,7 @@ if (!proto.__ha3dWebXRPatchedV2) {
       await this._renderer.xr.setSession(session);
       this._renderer.xr.setFoveation?.(0.65);
 
-      setXRButton(this, {
-        enabled: true,
-        text: "Sair do VR",
-        state: "ready",
-        detail: "Sessão WebXR ativa",
-      });
+      setXRButton(this, { enabled: true, text: "Sair do VR", state: "ready", detail: "Sessão WebXR ativa" });
 
       session.addEventListener("end", () => {
         this._ha3dXRSession = null;
@@ -253,12 +269,7 @@ if (!proto.__ha3dWebXRPatchedV2) {
         this.shadowRoot?.querySelector("#root")?.classList.remove("ha3d-xr-presenting");
         restoreDesktopCamera(this);
         this._ha3dIdleLastActivity = Date.now();
-        setXRButton(this, {
-          enabled: true,
-          text: "Entrar no VR",
-          state: "ready",
-          detail: "WebXR immersive-vr disponível",
-        });
+        setXRButton(this, { enabled: true, text: "Entrar no VR", state: "ready", detail: "WebXR immersive-vr disponível" });
       }, { once: true });
     } catch (error) {
       console.error("[HA3D XR] session failed", error);
@@ -274,7 +285,7 @@ if (!proto.__ha3dWebXRPatchedV2) {
         detail = "O navegador recusou immersive-vr ou algum recurso obrigatório";
       } else if (error?.name === "SecurityError") {
         message = "XR bloqueado";
-        detail = "WebXR foi bloqueado por segurança/Permissions-Policy (xr-spatial-tracking)";
+        detail = "Bloqueado por segurança/Permissions-Policy xr-spatial-tracking";
       }
 
       setXRButton(this, { enabled: false, text: message, state: "error", detail });
