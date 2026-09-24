@@ -1,3 +1,4 @@
+import * as THREE from "https://esm.sh/three@0.180.0";
 import "./ha3d-panel.js";
 
 const Panel = customElements.get("ha3d-panel");
@@ -17,6 +18,9 @@ function ensureXRState(panel) {
   panel._ha3dXRSupport = null;
   panel._ha3dXRRestore = null;
   panel._ha3dXRDiagnostic = "XR carregado";
+  panel._ha3dXRControllers = [];
+  panel._ha3dXRGrip = null;
+  panel._ha3dXRPlacementMode = "free";
 }
 
 function installXRStyle(panel) {
@@ -189,6 +193,90 @@ function prepareARModel(panel) {
   panel._model.updateMatrixWorld(true);
 }
 
+
+function makeXRControllerRay() {
+  const geometry = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(0, 0, 0),
+    new THREE.Vector3(0, 0, -1),
+  ]);
+  const material = new THREE.LineBasicMaterial({ color: 0x66ccff });
+  const line = new THREE.Line(geometry, material);
+  line.name = "HA3D_AR_Ray";
+  line.scale.z = 2.5;
+  return line;
+}
+
+function setupARControllers(panel) {
+  if (!panel._renderer?.xr || !panel._scene || !panel._model) return;
+  panel._ha3dXRControllers = [];
+  const raycaster = new THREE.Raycaster();
+  const rotation = new THREE.Matrix4();
+
+  for (let i = 0; i < 2; i += 1) {
+    const controller = panel._renderer.xr.getController(i);
+    controller.userData.ha3dIndex = i;
+    controller.add(makeXRControllerRay());
+
+    controller.addEventListener("selectstart", () => {
+      if (!panel._model || panel._ha3dXRGrip) return;
+      rotation.identity().extractRotation(controller.matrixWorld);
+      raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
+      raycaster.ray.direction.set(0, 0, -1).applyMatrix4(rotation);
+      const hits = raycaster.intersectObject(panel._model, true);
+      if (!hits.length) return;
+      const worldPosition = panel._model.getWorldPosition(new THREE.Vector3());
+      const inverse = controller.matrixWorld.clone().invert();
+      const localPosition = worldPosition.clone().applyMatrix4(inverse);
+      panel._ha3dXRGrip = {
+        controller,
+        localPosition,
+        startControllerY: controller.position.y,
+        startScale: panel._model.scale.x,
+      };
+    });
+
+    controller.addEventListener("selectend", () => {
+      if (panel._ha3dXRGrip?.controller === controller) panel._ha3dXRGrip = null;
+    });
+
+    panel._scene.add(controller);
+    panel._ha3dXRControllers.push(controller);
+  }
+}
+
+function updateARInteraction(panel) {
+  const grip = panel._ha3dXRGrip;
+  if (!grip?.controller || !panel._model) return;
+  const position = grip.localPosition.clone().applyMatrix4(grip.controller.matrixWorld);
+  panel._model.position.copy(position);
+  const dy = grip.controller.position.y - grip.startControllerY;
+  if (Math.abs(dy) > 0.02) {
+    const factor = THREE.MathUtils.clamp(1 + dy * 1.4, 0.35, 2.5);
+    panel._model.scale.setScalar(grip.startScale * factor);
+  }
+  panel._model.updateMatrixWorld(true);
+}
+
+function cleanupARControllers(panel) {
+  for (const controller of panel._ha3dXRControllers || []) {
+    controller.parent?.remove(controller);
+  }
+  panel._ha3dXRControllers = [];
+  panel._ha3dXRGrip = null;
+}
+
+function installARRenderHook(panel) {
+  if (panel._ha3dARRenderHookInstalled || !panel._renderer) return;
+  panel._ha3dARRenderHookInstalled = true;
+  const oldLoop = panel._renderer.setAnimationLoop.bind(panel._renderer);
+  const original = panel._renderer.getAnimationLoop?.();
+  if (!original) return;
+  oldLoop((time, frame) => {
+    if (panel._ha3dXRPresenting) updateARInteraction(panel, frame);
+    original(time, frame);
+  });
+}
+
 function pauseDesktopCameraSystems(panel) {
   panel._ha3dXRRestore = captureXRRestore(panel);
   panel._cameraAnimating = true;
@@ -323,6 +411,8 @@ if (!proto.__ha3dWebXRPatchedV4) {
       this._renderer.xr.setFramebufferScaleFactor?.(0.85);
       await this._renderer.xr.setSession(session);
       this._renderer.xr.setFoveation?.(0.65);
+      setupARControllers(this);
+      installARRenderHook(this);
 
       setXRButton(this, { enabled: true, text: "Sair da AR", state: "ready", detail: "Sessão WebXR ativa" });
 
@@ -330,6 +420,7 @@ if (!proto.__ha3dWebXRPatchedV4) {
         this._ha3dXRSession = null;
         this._ha3dXRPresenting = false;
         this.shadowRoot?.querySelector("#root")?.classList.remove("ha3d-xr-presenting");
+        cleanupARControllers(this);
         restoreDesktopCamera(this);
         this._ha3dIdleLastActivity = Date.now();
         setXRButton(this, { enabled: true, text: "Entrar em AR", state: "ready", detail: "WebXR immersive-ar disponível" });
@@ -339,6 +430,7 @@ if (!proto.__ha3dWebXRPatchedV4) {
       this._ha3dXRSession = null;
       this._ha3dXRPresenting = false;
       this.shadowRoot?.querySelector("#root")?.classList.remove("ha3d-xr-presenting");
+      cleanupARControllers(this);
       restoreDesktopCamera(this);
 
       let message = "Falha ao abrir AR";
