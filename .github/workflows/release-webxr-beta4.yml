@@ -1,0 +1,67 @@
+name: Publish HA3D WebXR beta 0.2.65-beta.4
+
+on:
+  push:
+    branches:
+      - feature/webxr
+    paths:
+      - .github/workflows/release-webxr-beta4.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify WebXR beta.4 wiring
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          manifest = json.loads(Path('custom_components/ha3d/manifest.json').read_text())
+          assert manifest['version'] == '0.2.65-beta.4'
+          init = Path('custom_components/ha3d/__init__.py').read_text()
+          assert 'FRONTEND_VERSION = "0.2.65-beta.4"' in init
+          entry = Path('custom_components/ha3d/frontend/ha3d-entry.js').read_text()
+          assert 'ha3d-webxr.js?v=webxr-4' in entry
+          xr = Path('custom_components/ha3d/frontend/ha3d-webxr.js').read_text()
+          assert 'collectHa3dPanels' in xr
+          assert 'installOnExistingPanels' in xr
+          assert 'proto.__ha3dWebXRPatchedV4' in xr
+          assert 'queueMicrotask(installOnExistingPanels)' in xr
+          for marker in ['VR exige HTTPS', 'WebXR indisponível', 'VR não suportado', 'XR bloqueado', 'Entrar no VR']:
+              assert marker in xr
+          PY
+      - name: Run validation
+        run: |
+          python -m compileall -q custom_components/ha3d
+          npm run check
+          npm test
+          python -m unittest discover -s tests -p 'test_*.py'
+      - name: Tag beta
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a v0.2.65-beta.4 -m "HA3D v0.2.65-beta.4 mounted panel WebXR fix"
+          git push origin v0.2.65-beta.4
+      - name: Create prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v0.2.65-beta.4 \
+            --target "$GITHUB_SHA" \
+            --prerelease \
+            --title "HA3D v0.2.65-beta.4 · Meta Quest mounted-panel fix" \
+            --notes "Quarto build experimental Meta Quest, ainda baseado na v0.2.59 estável. Corrige o caso em que o Home Assistant já havia criado o <ha3d-panel> durante o import de ha3d-panel.js, antes de ha3d-webxr.js conseguir patchar connectedCallback. O módulo agora procura instâncias HA3D já montadas através dos shadow roots do Home Assistant e instala o launcher XR nelas. Mantém os diagnósticos Entrar no VR, VR exige HTTPS, WebXR indisponível, VR não suportado e XR bloqueado. v0.2.59 permanece como rollback estável."
