@@ -149,7 +149,7 @@ class HA3DPanel extends HTMLElement {
     this._camera = new THREE.PerspectiveCamera(45, 1, 0.01, 100000);
     this._camera.position.set(7, 7, 7);
 
-    this._renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+    this._renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "high-performance" });
     this._renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
     this._renderer.shadowMap.enabled = true;
     this._renderer.shadowMap.type = THREE.PCFSoftShadowMap;
