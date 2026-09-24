@@ -1,0 +1,83 @@
+name: Publish HA3D WebXR beta 0.2.65-beta.12
+
+on:
+  push:
+    branches:
+      - feature/webxr
+    paths:
+      - .github/workflows/release-webxr-beta12.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify Quest AR beta.12 wiring
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          manifest = json.loads(Path('custom_components/ha3d/manifest.json').read_text())
+          assert manifest['version'] == '0.2.65-beta.12'
+          init = Path('custom_components/ha3d/__init__.py').read_text()
+          assert 'FRONTEND_VERSION = "0.2.65-beta.12"' in init
+          entry = Path('custom_components/ha3d/frontend/ha3d-entry.js').read_text()
+          assert 'ha3d-webxr-ar-v3.js?v=ar-v3-1' in entry
+          assert 'ha3d-webxr-ar-tabletop-fix.js?v=tabletop-fix-3' in entry
+          assert 'ha3d-webxr-ar-game-controls.js?v=game-controls-1' in entry
+
+          game = Path('custom_components/ha3d/frontend/ha3d-webxr-ar-game-controls.js').read_text()
+          for marker in [
+              'DEADZONE = 0.16',
+              'MOVE_SPEED_MPS',
+              'ROTATE_SPEED_RAD',
+              'SCALE_SPEED',
+              'gamepad?.axes',
+              'buttons?.[3]?.pressed',
+              'ICON_HIT_RADIUS_METERS',
+              'squeezestart',
+              'lightScaleFactor',
+              'ha3dBaseIntensity',
+              'light.distance = state.distance * scale',
+              'AR_EXPOSURE = 0.72',
+              '__ha3dARGameControlsV1',
+          ]:
+              assert marker in game, marker
+
+          package = json.loads(Path('package.json').read_text())
+          assert 'ha3d-webxr-ar-game-controls.js' in package['scripts']['check']
+          PY
+      - name: Run validation
+        run: |
+          python -m compileall -q custom_components/ha3d
+          npm run check
+          npm test
+          python -m unittest discover -s tests -p 'test_*.py'
+      - name: Tag beta
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a v0.2.65-beta.12 -m "HA3D v0.2.65-beta.12 Quest gamepad controls and miniature lighting"
+          git push origin v0.2.65-beta.12
+      - name: Create prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v0.2.65-beta.12 \
+            --target "$GITHUB_SHA" \
+            --prerelease \
+            --title "HA3D v0.2.65-beta.12 · Quest gamepad controls + AR lighting" \
+            --notes "Refaz a interação do Meta Quest no estilo de jogo. O analógico esquerdo move a maquete para frente/trás e lateralmente em relação à direção do observador; o analógico direito gira no eixo vertical e aumenta/diminui a escala; clicar o analógico direito recentraliza a maquete na frente do visor. Trigger fica dedicado aos ícones 3D e grip vira arraste manual de emergência. A seleção de ícones deixa de depender do raycast de Sprite e passa a usar um hit-test geométrico com área de tolerância maior e destaque visual ao mirar. Corrige também a iluminação estourada da maquete em miniatura: Point/Spot lights agora têm intensidade e alcance compensados pela escala física do apartamento, preservando o brilho percebido quando o GLB é reduzido para cerca de 1 m. Mantém passthrough, anchors, escala inicial e runtime AR v3. main e v0.2.59 permanecem intactas."
