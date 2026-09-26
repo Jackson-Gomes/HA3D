@@ -1,0 +1,25 @@
+name: Publish ChatGPT Voice beta
+
+on:
+  push:
+    branches:
+      - feature/chatgpt-voice-from-0.2.59
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    if: contains(github.event.head_commit.message, '[publish-chatgpt-voice]')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v0.2.66-beta.1 \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "HA3D v0.2.66-beta.1 · ChatGPT Voice wake bridge" \
+            --notes "Build experimental baseada diretamente na v0.2.59 estável. Adiciona wake word no dashboard HA3D e handoff para ChatGPT Voice sem OpenAI API key. Usa Voice Satellite quando disponível ou o pipeline oficial assist_pipeline/run do Home Assistant como fallback. No iPhone/iPad, o launcher padrão chama o Atalho 'HA Voz'. A main e a v0.2.59 permanecem intactas." \
+            --prerelease
