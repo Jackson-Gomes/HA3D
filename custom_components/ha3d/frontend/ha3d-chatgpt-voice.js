@@ -84,6 +84,30 @@ async function releaseWakeMic() {
   try { await nativeWake.stop({ releaseMic: true, sendEnd: true }); } catch (_) { /* best effort */ }
 }
 
+function navigateOutsideFrame(url) {
+  let targetWindow = window;
+  try {
+    if (window.top && window.top !== window) targetWindow = window.top;
+  } catch (_) { /* cross-origin parent: keep current window */ }
+
+  try {
+    targetWindow.location.assign(url);
+    return true;
+  } catch (_) {
+    try {
+      targetWindow.location.href = url;
+      return true;
+    } catch (_) {
+      try {
+        const opened = window.open(url, "_blank", "noopener,noreferrer");
+        return Boolean(opened);
+      } catch (_) {
+        return false;
+      }
+    }
+  }
+}
+
 function launch(panel, source = "manual", force = false) {
   const cfg = readCfg();
   if (!force && !cfg.auto) return;
@@ -96,8 +120,8 @@ function launch(panel, source = "manual", force = false) {
   releaseWakeMic();
   setStatus(panel, "Wake detectado · abrindo ChatGPT…", "wake");
   setTimeout(() => {
-    try { window.location.assign(url); }
-    catch (_) { window.location.href = url; }
+    const ok = navigateOutsideFrame(url);
+    if (!ok) setStatus(panel, "Navegador bloqueou a abertura do ChatGPT", "error");
   }, 80);
   // If the OS/browser refuses the handoff and the page stays visible, re-arm.
   setTimeout(() => {
