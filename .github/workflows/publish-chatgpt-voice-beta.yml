@@ -17,9 +17,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create v0.2.66-beta.2 \
+          gh release create v0.2.66-beta.3 \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
-            --title "HA3D v0.2.66-beta.2 · ChatGPT iframe handoff fix" \
-            --notes "Corrige o handoff do ChatGPT quando o HA3D está aberto dentro de um dashboard/iframe. Em vez de tentar carregar chatgpt.com dentro do iframe, a navegação é promovida para a janela principal, evitando 'chatgpt.com se recusou a conectar'. Mantém a base v0.2.59, wake word e o handoff para ChatGPT Voice. main e v0.2.59 permanecem intactas." \
+            --title "HA3D v0.2.66-beta.3 · ChatGPT Browser Bridge" \
+            --notes "Experimental ChatGPT Voice hosted inside Home Assistant: keeps the iPad microphone in HA3D, uses the HA wake-word pipeline, routes PCM through the HA3D ChatGPT Audio Bridge add-on into a PulseAudio virtual microphone, and keeps a Chromium add-on session embedded through Supervisor ingress. No iOS Shortcut or ChatGPT app handoff. Based on stable v0.2.59; main and v0.2.59 stay untouched." \
             --prerelease
