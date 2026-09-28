@@ -9,10 +9,12 @@ from homeassistant.helpers.storage import Store
 
 from .const import MODEL_PUBLIC_URL, STORE_KEY, STORE_VERSION
 
+_BINDING_RESET_MARKER = "bindings_reset_v030"
+
 DEFAULT_CONFIG: dict[str, Any] = {
     "model_url": None,
     "model_revision": 0,
-    "auto_bind": True,
+    "auto_bind": False,
     "bindings": {},
     "object_positions": {},
     "area_bindings": {},
@@ -23,6 +25,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "floating_widgets": [],
     "entity_aliases": {},
     "marker_proximity": {},
+    _BINDING_RESET_MARKER: True,
 }
 
 
@@ -36,9 +39,25 @@ class HA3DStore:
     async def async_load(self) -> dict[str, Any]:
         if self._data is None:
             stored = await self._store.async_load() or {}
+
+            # v0.3.0 deliberately starts the entity-binding layer from zero.
+            # This migration runs once, then users can recreate bindings normally.
+            if not stored.get(_BINDING_RESET_MARKER):
+                stored = dict(stored)
+                stored["auto_bind"] = False
+                stored["bindings"] = {}
+                stored["area_bindings"] = {}
+                stored["advanced_bindings"] = {}
+                stored["entity_aliases"] = {}
+                stored["marker_proximity"] = {}
+                stored[_BINDING_RESET_MARKER] = True
+                await self._store.async_save(stored)
+
             self._data = deepcopy(DEFAULT_CONFIG)
             self._data.update(stored)
             self._data["bindings"] = dict(stored.get("bindings", {}))
+            self._data["area_bindings"] = dict(stored.get("area_bindings", {}))
+            self._data["advanced_bindings"] = dict(stored.get("advanced_bindings", {}))
             self._data["virtual_lights"] = list(stored.get("virtual_lights", []))
             self._data["scene_assets"] = list(stored.get("scene_assets", []))
             self._data["floating_widgets"] = list(stored.get("floating_widgets", []))
