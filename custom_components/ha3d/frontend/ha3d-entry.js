@@ -63,3 +63,4 @@ import "./ha3d-bottom-view-hub.js?v=bottom-view-hub-1";
 import "./ha3d-view-zone-xray-fix.js?v=view-zone-xray-fix-1";
 import "./ha3d-no-empty-overlay.js?v=no-empty-overlay-1";
 import "./ha3d-editor-selection-lock.js?v=editor-selection-lock-2";
+import "./ha3d-upload-fix.js?v=upload-fix-1";
