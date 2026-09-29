@@ -1,0 +1,27 @@
+name: Publish HA3D v0.3.9
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish v0.3.9
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view v0.3.9 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "v0.3.9 already exists"
+            exit 0
+          fi
+          gh release create v0.3.9 \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "HA3D v0.3.9" \
+            --notes "Corrige o upload do novo apto3071.glb: o arquivo tem cerca de 354 MiB e ultrapassava o limite anterior de 250 MiB. O limite do HA3D passa para 512 MiB, mantendo o override local do limite HTTP do Home Assistant. Também corrige a mensagem de erro do frontend para não tentar interpretar respostas HTTP de erro em texto como JSON. Mantém upload GLB puro, substituição do model.glb anterior e a correção de seleção das luzes no Editor."
