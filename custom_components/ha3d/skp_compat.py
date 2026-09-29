@@ -35,9 +35,6 @@ def _decode_utf16_record(data: bytes, marker: int) -> Optional[tuple[str, int]]:
             length = struct.unpack_from("<I", data, pos)[0]
             pos += 4
 
-    # A texture/source path can be long, but an absurd record length is a
-    # strong sign that a random ff-fe-ff byte sequence was mistaken for a
-    # string marker while scanning opaque legacy data.
     if length > 32768:
         return None
 
@@ -58,27 +55,61 @@ def _plausible_texture_filename(value: str) -> bool:
     return not any(ord(char) < 0x20 and char not in "\t\r\n" for char in value)
 
 
+def decode_legacy_solid_material_tail(
+    data: bytes,
+    pos: int,
+) -> Optional[tuple[bytes, str, float, int, int]]:
+    """Validate/decode the solid-material payload beginning at *pos*.
+
+    Classic solid CMaterial payload after texflag is:
+      RGBA[4] + UTF-16 texture-path + blob[8] + opacity:f64 + use-opacity:u8
+
+    A real SketchUp 2017 file (apto3071.skp) contains material ``Image1``
+    with texflag=0x0100 even though the following bytes are exactly this
+    solid layout. OpenSKP treats every non-zero texflag as textured and then
+    misreads the RGBA bytes as a CDib class reference. This structural check
+    lets HA3D recognize that producer quirk without weakening real texture
+    parsing.
+    """
+    if pos < 0 or pos + 4 > len(data):
+        return None
+
+    rgba = data[pos:pos + 4]
+    path_record = _decode_utf16_record(data, pos + 4)
+    if path_record is None:
+        return None
+
+    path, after_path = path_record
+    if not _plausible_texture_filename(path):
+        return None
+    if after_path + 17 > len(data):
+        return None
+
+    try:
+        opacity = struct.unpack_from("<d", data, after_path + 8)[0]
+    except struct.error:
+        return None
+    use_opacity = data[after_path + 16]
+
+    if not math.isfinite(opacity) or not -1e-6 <= opacity <= 1.000001:
+        return None
+    if use_opacity not in (0, 1):
+        return None
+
+    return rgba, path, opacity, use_opacity, after_path + 17
+
+
 def _validate_material_tail_after_filename(
     data: bytes,
     after_filename: int,
 ) -> Optional[int]:
-    """Validate the bytes following a legacy texture filename.
-
-    The legacy material tail is unusually distinctive:
-      RGBA + 00 + RGBA, one UTF-16 record, two u32 values, opacity:f64,
-      use-opacity:u8.
-
-    Returning the end position lets the caller distinguish a real filename
-    marker from ff-fe-ff sequences that happen to occur inside opaque data.
-    """
+    """Validate the bytes following a legacy texture filename."""
     if after_filename + 9 > len(data):
         return None
 
     average = data[after_filename:after_filename + 9]
     if average[4] != 0:
         return None
-    # Real files store the colour twice. Alpha can differ on colorized
-    # materials, so compare RGB only.
     if average[:3] != average[5:8]:
         return None
 
@@ -148,14 +179,7 @@ def find_legacy_texture_tail_without_size(
     *,
     max_scan: int = _MAX_TEXTURE_TAIL_SCAN,
 ) -> Optional[tuple[int, str]]:
-    """Find a complete legacy texture tail even when applied size is absent.
-
-    Some real SketchUp legacy files contain an opaque/object-reference record
-    between CDib and the texture filename instead of OpenSKP's expected
-    ``[optional u32] + width:f64 + height:f64`` sequence. In that case there
-    is no safe way to invent the missing model-space tile size, but the rest
-    of the material is still parseable and the embedded texture can be kept.
-    """
+    """Find a complete legacy texture tail even when applied size is absent."""
     if pos < 0 or pos >= len(data):
         return None
 
@@ -179,90 +203,142 @@ def find_legacy_texture_tail_without_size(
 
 
 def install_openskp_legacy_texture_workaround() -> bool:
-    """Patch OpenSKP 1.3.x's private legacy texture reader in-process."""
+    """Patch OpenSKP 1.3.x legacy material/texture readers in-process."""
     from openskp import legacy
 
-    current = getattr(legacy, "_texture_block", None)
-    if current is None:
+    current_texture = getattr(legacy, "_texture_block", None)
+    if current_texture is None:
         return False
-    if getattr(current, "__ha3d_texture_compat__", False):
-        return True
 
-    def _texture_block_compat(ar, r):
-        r.raw(2 if ar.ver >= 17 else 1)  # texture flag pad
-        slot, _, dib = ar.read_object(r, expect="CDib")
-        if not (isinstance(dib, dict) and dib.get("k") == "dib"):
-            raise legacy.LegacyParseError(f"texture object is not a dib {r.ctx()}")
+    if not getattr(current_texture, "__ha3d_texture_compat__", False):
+        def _texture_block_compat(ar, r):
+            r.raw(2 if ar.ver >= 17 else 1)  # texture flag pad
+            slot, _, dib = ar.read_object(r, expect="CDib")
+            if not (isinstance(dib, dict) and dib.get("k") == "dib"):
+                raise legacy.LegacyParseError(f"texture object is not a dib {r.ctx()}")
 
-        width: Optional[float] = None
-        height: Optional[float] = None
-        sizeless_recovery = False
+            width: Optional[float] = None
+            height: Optional[float] = None
+            sizeless_recovery = False
 
-        marker = r.data.find(_STR_MARKER, r.pos, r.pos + 28)
-        delta = marker - r.pos
-        if delta == 20:
-            r.u32()
-        elif delta != 16:
-            recovered = find_legacy_texture_size_block(r.data, r.pos)
-            if recovered is not None:
-                size_pos, marker, width, height, filename = recovered
-                skipped = size_pos - r.pos
-                _LOGGER.warning(
-                    "HA3D recovered legacy SKP texture size block at %#x: "
-                    "skipped %d opaque bytes, applied size %.6g x %.6g, file=%r",
-                    r.pos,
-                    skipped,
-                    width,
-                    height,
-                    filename,
+            marker = r.data.find(_STR_MARKER, r.pos, r.pos + 28)
+            delta = marker - r.pos
+            if delta == 20:
+                r.u32()
+            elif delta != 16:
+                recovered = find_legacy_texture_size_block(r.data, r.pos)
+                if recovered is not None:
+                    size_pos, marker, width, height, filename = recovered
+                    skipped = size_pos - r.pos
+                    _LOGGER.warning(
+                        "HA3D recovered legacy SKP texture size block at %#x: "
+                        "skipped %d opaque bytes, applied size %.6g x %.6g, file=%r",
+                        r.pos,
+                        skipped,
+                        width,
+                        height,
+                        filename,
+                    )
+                    r.pos = size_pos
+                else:
+                    sizeless = find_legacy_texture_tail_without_size(r.data, r.pos)
+                    if sizeless is None:
+                        raise legacy.LegacyParseError(
+                            f"texture size block misaligned {r.ctx()}"
+                        )
+
+                    marker, filename = sizeless
+                    skipped = marker - r.pos
+                    width = _FALLBACK_APPLIED_SIZE
+                    height = _FALLBACK_APPLIED_SIZE
+                    sizeless_recovery = True
+                    _LOGGER.warning(
+                        "HA3D recovered legacy SKP texture without applied-size pair "
+                        "at %#x: skipped %d opaque bytes, file=%r. Using %.3g x %.3g "
+                        "tile size; texture mapping scale may differ from SketchUp.",
+                        r.pos,
+                        skipped,
+                        filename,
+                        width,
+                        height,
+                    )
+                    r.pos = marker
+
+            if not sizeless_recovery:
+                width = r.f64()
+                height = r.f64()
+
+            filename = r.utf16()
+            average = r.raw(9)  # RGBA + 00 + RGBA
+            r.utf16()
+            blob = r.raw(8)  # u32 + u32 colorized flag
+            opacity = r.f64()
+            use_opacity = r.u8()
+            colorized = bool(blob[4]) or average[3] == 0xFF
+
+            return {
+                "rgba": tuple(average[:4]),
+                "opacity": opacity,
+                "use_opacity": use_opacity,
+                "tex_dib": slot,
+                "tex_w": width,
+                "tex_h": height,
+                "tex_file": filename,
+                "colorized": colorized,
+            }
+
+        _texture_block_compat.__ha3d_texture_compat__ = True
+        legacy._texture_block = _texture_block_compat
+
+    current_material = getattr(legacy, "_READERS", {}).get(
+        "CMaterial", getattr(legacy, "_read_material", None)
+    )
+    if current_material is None:
+        return False
+
+    if not getattr(current_material, "__ha3d_material_compat__", False):
+        def _read_material_compat(ar, r):
+            legacy._preamble(ar, r)
+            name = r.utf16()
+            texflag = r.u16()
+            out = {"k": "material", "name": name}
+
+            # Some real SketchUp 2017 files carry texflag=0x0100 while the
+            # bytes that follow are unambiguously the ordinary SOLID material
+            # payload. apto3071.skp/Image1 is one such file. Detect the payload
+            # structurally before treating any non-zero flag as a texture.
+            solid_override = (
+                texflag != 0
+                and decode_legacy_solid_material_tail(r.data, r.pos) is not None
+            )
+
+            if texflag == 0 or solid_override:
+                if solid_override:
+                    _LOGGER.warning(
+                        "HA3D recovered legacy solid material %r with anomalous "
+                        "texture flag %#x at %#x",
+                        name,
+                        texflag,
+                        r.pos,
+                    )
+                rgba = r.raw(4)
+                r.utf16()  # texture path (usually empty for solid materials)
+                r.raw(8)
+                opacity = r.f64()
+                use_opacity = r.u8()
+                out.update(
+                    rgba=tuple(rgba),
+                    opacity=opacity,
+                    use_opacity=use_opacity,
                 )
-                r.pos = size_pos
             else:
-                sizeless = find_legacy_texture_tail_without_size(r.data, r.pos)
-                if sizeless is None:
-                    raise legacy.LegacyParseError(f"texture size block misaligned {r.ctx()}")
+                out.update(legacy._texture_block(ar, r))
 
-                marker, filename = sizeless
-                skipped = marker - r.pos
-                width = _FALLBACK_APPLIED_SIZE
-                height = _FALLBACK_APPLIED_SIZE
-                sizeless_recovery = True
-                _LOGGER.warning(
-                    "HA3D recovered legacy SKP texture without applied-size pair "
-                    "at %#x: skipped %d opaque bytes, file=%r. Using %.3g x %.3g "
-                    "tile size; texture mapping scale may differ from SketchUp.",
-                    r.pos,
-                    skipped,
-                    filename,
-                    width,
-                    height,
-                )
-                r.pos = marker
+            return out
 
-        if not sizeless_recovery:
-            width = r.f64()
-            height = r.f64()
+        _read_material_compat.__ha3d_material_compat__ = True
+        legacy._read_material = _read_material_compat
+        legacy._READERS["CMaterial"] = _read_material_compat
 
-        filename = r.utf16()
-        average = r.raw(9)  # RGBA + 00 + RGBA
-        r.utf16()
-        blob = r.raw(8)  # u32 + u32 colorized flag
-        opacity = r.f64()
-        use_opacity = r.u8()
-        colorized = bool(blob[4]) or average[3] == 0xFF
-
-        return {
-            "rgba": tuple(average[:4]),
-            "opacity": opacity,
-            "use_opacity": use_opacity,
-            "tex_dib": slot,
-            "tex_w": width,
-            "tex_h": height,
-            "tex_file": filename,
-            "colorized": colorized,
-        }
-
-    _texture_block_compat.__ha3d_texture_compat__ = True
-    legacy._texture_block = _texture_block_compat
-    _LOGGER.info("HA3D enabled OpenSKP legacy texture compatibility reader")
+    _LOGGER.info("HA3D enabled OpenSKP legacy material/texture compatibility readers")
     return True
