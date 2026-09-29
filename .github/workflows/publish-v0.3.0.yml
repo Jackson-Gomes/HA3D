@@ -1,0 +1,28 @@
+name: Publish HA3D v0.3.0
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish v0.3.0
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view v0.3.0 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "v0.3.0 already published"
+            exit 0
+          fi
+          gh release create v0.3.0 \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "HA3D v0.3.0" \
+            --notes "Base consolidada com a v0.3.0. Remove os bindings existentes uma única vez na primeira inicialização, desativa auto-binding para reconstrução manual e adiciona cintilação tipo TV configurável em Point e Spot lights, com duas cores e período ajustável. Mantém também as correções já presentes na main para robô e visualização."
