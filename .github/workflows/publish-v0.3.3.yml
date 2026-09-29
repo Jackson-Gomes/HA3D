@@ -1,0 +1,28 @@
+name: Publish HA3D v0.3.3
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish v0.3.3
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view v0.3.3 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "v0.3.3 already published"
+            exit 0
+          fi
+          gh release create v0.3.3 \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "HA3D v0.3.3" \
+            --notes "Adiciona importação direta de SketchUp .skp com conversão local para GLB via OpenSKP 1.3.0, validada por smoke test real. Corrige também a estabilidade de seleção do editor e do gizmo para impedir que objetos atrás roubem a seleção, inclusive quando luzes virtuais são escolhidas pelo menu. Corrige a etapa de parse exigida pelo OpenSKP antes da exportação GLB."
