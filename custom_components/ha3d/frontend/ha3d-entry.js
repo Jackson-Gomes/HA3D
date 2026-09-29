@@ -64,3 +64,4 @@ import "./ha3d-view-zone-xray-fix.js?v=view-zone-xray-fix-1";
 import "./ha3d-no-empty-overlay.js?v=no-empty-overlay-1";
 import "./ha3d-skp-import.js?v=skp-import-1";
 import "./ha3d-editor-selection-lock.js?v=editor-selection-lock-1";
+import "./ha3d-upload-editor-guard.js?v=upload-editor-guard-1";
