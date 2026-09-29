@@ -4,8 +4,8 @@ const Panel = customElements.get("ha3d-panel");
 if (!Panel) throw new Error("HA3D panel was not registered");
 const proto = Panel.prototype;
 
-const MEDIA_BLUE = new THREE.Color(0x3a7bff);
-const MEDIA_PURPLE_BLUE = new THREE.Color(0x754dff);
+const DEFAULT_A = "#3a7bff";
+const DEFAULT_B = "#754dff";
 
 function effectiveState(panel, config) {
   if (config?.entity_id) {
@@ -20,13 +20,15 @@ function effectiveState(panel, config) {
   return { on: config?.enabled !== false, brightness: 1 };
 }
 
-function updateEffects(panel, timeMs) {
-  const t = Number(timeMs || 0) * 0.001;
+function safeColor(value, fallback) {
+  try { return new THREE.Color(value || fallback); } catch (_error) { return new THREE.Color(fallback); }
+}
 
+function updateEffects(panel, timeMs) {
   for (const runtime of panel?._ha3dVirtualLights?.values?.() || []) {
     const config = runtime?.config;
     const light = runtime?.light;
-    if (!config || !light || !light.isSpotLight || config.effect !== "tv_flicker") continue;
+    if (!config || !light || config.effect !== "tv_flicker") continue;
 
     const state = effectiveState(panel, config);
     if (!state.on) {
@@ -40,23 +42,26 @@ function updateEffects(panel, timeMs) {
       continue;
     }
 
-    // Same organic rhythm used by the existing TV effect: a slow color drift
-    // plus a faster non-binary intensity modulation so it never looks like a
-    // simple blinking light.
-    const colorWave = 0.5 + 0.5 * Math.sin(t * 1.45 + 0.35 * Math.sin(t * 0.63));
-    const flicker = 0.88 + 0.12 * (0.5 + 0.5 * Math.sin(t * 5.2 + 0.45 * Math.sin(t * 2.1)));
+    const periodMs = Math.max(50, Math.min(60000, Number(config.flicker_period_ms) || 1200));
+    const phase = (Number(timeMs || 0) % periodMs) / periodMs;
+    const angle = phase * Math.PI * 2;
 
+    // Organic TV-like cycle. The selected period controls the full color cycle;
+    // a nested wave keeps the intensity alive instead of looking like on/off blink.
+    const colorWave = 0.5 + 0.5 * Math.sin(angle + 0.28 * Math.sin(angle * 0.47));
+    const flicker = 0.84 + 0.16 * (0.5 + 0.5 * Math.sin(angle * 3.6 + 0.5 * Math.sin(angle * 1.7)));
+
+    const colorA = safeColor(config.flicker_color_a, DEFAULT_A);
+    const colorB = safeColor(config.flicker_color_b, DEFAULT_B);
     light.intensity = base * flicker;
-    light.color.copy(MEDIA_BLUE).lerp(MEDIA_PURPLE_BLUE, colorWave);
+    light.color.copy(colorA).lerp(colorB, colorWave);
     light.castShadow = Boolean(config.cast_shadow && light.intensity > 0);
   }
 }
 
-if (!proto.__ha3dVirtualLightEffectsV1) {
-  proto.__ha3dVirtualLightEffectsV1 = true;
+if (!proto.__ha3dVirtualLightEffectsV2) {
+  proto.__ha3dVirtualLightEffectsV2 = true;
 
-  // _updateLightMarkers already runs once per animation frame immediately before
-  // render, so piggyback here instead of creating a second render loop.
   const oldUpdateLightMarkers = proto._updateLightMarkers;
   proto._updateLightMarkers = function (...args) {
     const result = oldUpdateLightMarkers?.apply(this, args);

@@ -246,6 +246,10 @@ if (!proto.__ha3dBindingEditorOverrideV1) {
       }
     }
 
+    // v0.3.0: implicit light-name binding follows auto_bind too.
+    // With auto_bind disabled, only bindings explicitly created by the user apply.
+    if (this._config?.auto_bind === false) return null;
+
     for (const item of hierarchy) {
       for (const name of namesForObject(item)) {
         if (name.startsWith("LightNode_light.")) {

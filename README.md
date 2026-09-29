@@ -1,5 +1,8 @@
 # HA3D
 
+> **v0.3.0** — criada diretamente sobre a base estável v0.2.59. Na primeira inicialização desta versão, os bindings de entidades existentes são zerados uma única vez e o auto-binding fica desligado para permitir reconstrução manual. Luzes virtuais Point e Spot agora aceitam cintilação tipo TV com duas cores configuráveis e período de 50 a 60000 ms.
+
+
 HA3D transforma um modelo `.glb` em uma interface 3D genérica para Home Assistant.
 
 A meta do projeto é simples: instalar o HA3D, subir um GLB e vincular objetos do modelo às entidades do Home Assistant sem editar HTML específico para cada casa.
