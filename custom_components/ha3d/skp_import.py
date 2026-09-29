@@ -12,6 +12,7 @@ from homeassistant.components.http import HomeAssistantView
 from homeassistant.core import HomeAssistant
 
 from .const import MAX_MODEL_BYTES, MAX_SKP_SOURCE_BYTES, MODEL_RELATIVE_PATH
+from .skp_compat import install_openskp_legacy_texture_workaround
 from .storage import HA3DStore
 
 _LOGGER = logging.getLogger(__name__)
@@ -22,6 +23,13 @@ def _convert_skp_to_glb(source: Path, target: Path) -> None:
     """Convert an SKP file to GLB using OpenSKP."""
     from openskp import SkpFile
     from openskp.export import glb
+
+    # OpenSKP 1.3.0 is intentionally pinned by HA3D. Some real legacy SKP
+    # files contain an extra opaque/filler block between the embedded CDib
+    # and the applied texture size. The upstream reader rejects those files
+    # as "texture size block misaligned". Install HA3D's validated recovery
+    # reader before parsing so geometry/materials/textures can still be kept.
+    install_openskp_legacy_texture_workaround()
 
     skp = SkpFile.open(str(source))
     skp.parse()
