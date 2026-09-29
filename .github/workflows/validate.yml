@@ -50,8 +50,8 @@ jobs:
           python -m unittest discover -s tests -p 'test_*.py'
 
   publish:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: syntax
-    if: github.event_name == 'push' && github.event.head_commit.message == 'ci: publish HA3D v0.3.7'
     runs-on: ubuntu-latest
     steps:
       - name: Publish v0.3.7
