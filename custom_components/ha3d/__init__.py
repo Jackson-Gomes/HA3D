@@ -27,7 +27,7 @@ from .storage import HA3DStore
 from .virtual_lights import HA3DVirtualLightsView
 
 
-FRONTEND_VERSION = "0.3.8"
+FRONTEND_VERSION = "0.3.9"
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
