@@ -30,6 +30,7 @@ jobs:
           builder.save(source)
 
           skp = SkpFile.open(source)
+          skp.parse()
           glb.export(skp, target)
 
           assert target.read_bytes()[:4] == b'glTF'

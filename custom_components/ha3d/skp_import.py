@@ -24,6 +24,7 @@ def _convert_skp_to_glb(source: Path, target: Path) -> None:
     from openskp.export import glb
 
     skp = SkpFile.open(str(source))
+    skp.parse()
     glb.export(skp, str(target))
 
 
