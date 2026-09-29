@@ -11,7 +11,7 @@ from aiohttp import web
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.core import HomeAssistant
 
-from .const import MAX_MODEL_BYTES, MODEL_RELATIVE_PATH
+from .const import MAX_MODEL_BYTES, MAX_SKP_SOURCE_BYTES, MODEL_RELATIVE_PATH
 from .storage import HA3DStore
 
 _LOGGER = logging.getLogger(__name__)
@@ -33,6 +33,11 @@ def _read_glb_header(path: Path) -> bytes:
         return handle.read(4)
 
 
+def _json_error(error: str, status: int, **extra: object) -> web.Response:
+    """Return an aiohttp JSON error response with an explicit HTTP status."""
+    return web.json_response({"error": error, **extra}, status=status)
+
+
 class HA3DSkpUploadView(HomeAssistantView):
     """Upload a SketchUp SKP file, convert it locally, and install it as the HA3D model."""
 
@@ -46,15 +51,15 @@ class HA3DSkpUploadView(HomeAssistantView):
 
     async def post(self, request: web.Request) -> web.Response:
         if not request["hass_user"].is_admin:
-            return self.json({"error": "admin_required"}, status=403)
+            return _json_error("admin_required", 403)
 
         if not request.content_type.startswith("multipart/"):
-            return self.json({"error": "multipart_required"}, status=400)
+            return _json_error("multipart_required", 400)
 
         try:
             reader = await request.multipart()
         except Exception:
-            return self.json({"error": "invalid_multipart"}, status=400)
+            return _json_error("invalid_multipart", 400)
 
         file_field = None
         while field := await reader.next():
@@ -63,9 +68,9 @@ class HA3DSkpUploadView(HomeAssistantView):
                 break
 
         if file_field is None or not file_field.filename:
-            return self.json({"error": "file_required"}, status=400)
+            return _json_error("file_required", 400)
         if not file_field.filename.lower().endswith(".skp"):
-            return self.json({"error": "skp_required"}, status=400)
+            return _json_error("skp_required", 400)
 
         target = Path(self._hass.config.path(MODEL_RELATIVE_PATH))
         await self._hass.async_add_executor_job(
@@ -85,7 +90,7 @@ class HA3DSkpUploadView(HomeAssistantView):
                 if not chunk:
                     break
                 total += len(chunk)
-                if total > MAX_MODEL_BYTES:
+                if total > MAX_SKP_SOURCE_BYTES:
                     too_large = True
                     break
                 await self._hass.async_add_executor_job(handle.write, chunk)
@@ -94,9 +99,10 @@ class HA3DSkpUploadView(HomeAssistantView):
 
         if too_large:
             await self._hass.async_add_executor_job(source.unlink, True)
-            return self.json(
-                {"error": "model_too_large", "max_bytes": MAX_MODEL_BYTES},
-                status=413,
+            return _json_error(
+                "skp_source_too_large",
+                413,
+                max_bytes=MAX_SKP_SOURCE_BYTES,
             )
 
         try:
@@ -105,35 +111,33 @@ class HA3DSkpUploadView(HomeAssistantView):
             _LOGGER.exception("OpenSKP is unavailable")
             await self._hass.async_add_executor_job(source.unlink, True)
             await self._hass.async_add_executor_job(converted.unlink, True)
-            return self.json({"error": "skp_converter_unavailable"}, status=503)
+            return _json_error("skp_converter_unavailable", 503)
         except Exception as error:
             _LOGGER.exception("Failed to convert SketchUp model %s", file_field.filename)
             await self._hass.async_add_executor_job(source.unlink, True)
             await self._hass.async_add_executor_job(converted.unlink, True)
             message = str(error).strip()[:300] or error.__class__.__name__
-            return self.json(
-                {"error": "skp_conversion_failed", "message": message},
-                status=400,
-            )
+            return _json_error("skp_conversion_failed", 400, message=message)
         finally:
             if await self._hass.async_add_executor_job(source.exists):
                 await self._hass.async_add_executor_job(source.unlink, True)
 
         if not await self._hass.async_add_executor_job(converted.is_file):
-            return self.json({"error": "skp_conversion_no_output"}, status=500)
+            return _json_error("skp_conversion_no_output", 500)
 
         converted_bytes = await self._hass.async_add_executor_job(lambda: converted.stat().st_size)
         if converted_bytes > MAX_MODEL_BYTES:
             await self._hass.async_add_executor_job(converted.unlink, True)
-            return self.json(
-                {"error": "converted_model_too_large", "max_bytes": MAX_MODEL_BYTES},
-                status=413,
+            return _json_error(
+                "converted_model_too_large",
+                413,
+                max_bytes=MAX_MODEL_BYTES,
             )
 
         header = await self._hass.async_add_executor_job(_read_glb_header, converted)
         if header != b"glTF":
             await self._hass.async_add_executor_job(converted.unlink, True)
-            return self.json({"error": "invalid_converted_glb"}, status=500)
+            return _json_error("invalid_converted_glb", 500)
 
         await self._hass.async_add_executor_job(os.replace, converted, target)
         data = await self._store.async_set_model_ready()
