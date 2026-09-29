@@ -14,7 +14,7 @@ SCENE_ASSETS_PUBLIC_DIR: Final = "/local/ha3d/assets"
 SCENE_ASSETS_RELATIVE_DIR: Final = "www/ha3d/assets"
 STORE_KEY: Final = "ha3d"
 STORE_VERSION: Final = 1
-# GLB upload limit. This protects the browser/viewer from accidentally loading
-# extremely large models.
-MAX_MODEL_BYTES: Final = 250 * 1024 * 1024
+# GLB upload limit. Keep this above the current apartment model size while
+# still protecting the browser/viewer from accidental multi-gigabyte uploads.
+MAX_MODEL_BYTES: Final = 512 * 1024 * 1024
 MAX_SCENE_ASSETS: Final = 50
