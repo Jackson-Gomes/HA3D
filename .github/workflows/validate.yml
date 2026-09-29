@@ -5,9 +5,6 @@ on:
   pull_request:
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 jobs:
   syntax:
     runs-on: ubuntu-latest
@@ -48,18 +45,3 @@ jobs:
         run: |
           npm test
           python -m unittest discover -s tests -p 'test_*.py'
-
-  publish:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: syntax
-    runs-on: ubuntu-latest
-    steps:
-      - name: Publish v0.3.7
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release create v0.3.7 \
-            --repo "$GITHUB_REPOSITORY" \
-            --target "$GITHUB_SHA" \
-            --title "HA3D v0.3.7" \
-            --notes "Corrige a importação do apto3071.skp usando o arquivo real como referência. O material Image1 possui texflag=0x0100, mas o payload seguinte é o layout de material sólido (RGBA + caminho UTF-16 + opacidade), não uma textura CDib. O HA3D agora detecta essa estrutura antes de entrar no parser de textura, preservando materiais texturizados normais como Image3 e evitando o erro 'texture size block misaligned'."
