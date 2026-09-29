@@ -22,11 +22,12 @@ from .floating_widgets import HA3DFloatingWidgetsView
 from .http import HA3DAreasView, HA3DConfigView, HA3DModelUploadView
 from .marker_proximity import HA3DMarkerProximityView
 from .scene_assets import HA3DSceneAssetUploadView, HA3DSceneAssetsView
+from .skp_import import HA3DSkpUploadView
 from .storage import HA3DStore
 from .virtual_lights import HA3DVirtualLightsView
 
 
-FRONTEND_VERSION = "0.3.1"
+FRONTEND_VERSION = "0.3.2"
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -47,6 +48,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
         hass.http.register_view(HA3DConfigView(store))
         hass.http.register_view(HA3DModelUploadView(hass, store))
+        hass.http.register_view(HA3DSkpUploadView(hass, store))
         hass.http.register_view(HA3DAreasView(hass))
         hass.http.register_view(HA3DVirtualLightsView(store))
         hass.http.register_view(HA3DSceneAssetsView(hass, store))
