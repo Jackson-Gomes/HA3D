@@ -19,8 +19,9 @@ from .const import (
 )
 from .entity_aliases import HA3DEntityAliasesView
 from .floating_widgets import HA3DFloatingWidgetsView
-from .http import HA3DAreasView, HA3DConfigView, HA3DModelUploadView
+from .http import HA3DAreasView, HA3DConfigView
 from .marker_proximity import HA3DMarkerProximityView
+from .model_upload import HA3DModelUploadView
 from .scene_assets import HA3DSceneAssetUploadView, HA3DSceneAssetsView
 from .storage import HA3DStore
 from .virtual_lights import HA3DVirtualLightsView
