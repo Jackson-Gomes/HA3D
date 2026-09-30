@@ -1,0 +1,74 @@
+name: Publish HA3D v0.2.64-lightmedia.5-beta.8
+
+on:
+  push:
+    paths:
+      - .github/workflows/release-v0.2.64-lightmedia.5-beta.8.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify local mDNS MJPEG support
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          version='0.2.64-lightmedia.5-beta.8'
+          manifest=json.loads(Path('custom_components/ha3d/manifest.json').read_text())
+          assert manifest['version']==version
+          init=Path('custom_components/ha3d/__init__.py').read_text()
+          assert f'FRONTEND_VERSION = "{version}"' in init
+          backend=Path('custom_components/ha3d/mjpeg_proxy.py').read_text()
+          for marker in [
+              'async def _private_mjpeg_url',
+              'host.endswith(".local")',
+              'getaddrinfo(',
+              'all(_is_private_address(address) for address in addresses)',
+              'url = await _private_mjpeg_url',
+              'requires_auth = True',
+          ]:
+              assert marker in backend, marker
+          # Existing beta.7 features must remain present.
+          entry=Path('custom_components/ha3d/frontend/ha3d-entry.js').read_text()
+          assert 'ha3d-mjpeg.js?v=mjpeg-1' in entry
+          assert 'ha3d-object-scene-menu.js?v=object-scene-menu-1' in entry
+          power=Path('custom_components/ha3d/frontend/ha3d-media-panel-power.js').read_text()
+          assert 'material.map = null' in power
+          assert 'contains("ha3d-idle-xray")' in power
+          PY
+          python -m py_compile custom_components/ha3d/mjpeg_proxy.py
+          node --check custom_components/ha3d/frontend/ha3d-entry.js
+      - name: Run validation
+        run: |
+          python -m compileall -q custom_components/ha3d
+          npm run check
+          npm test
+          python -m unittest discover -s tests -p 'test_*.py'
+      - name: Tag release
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a v0.2.64-lightmedia.5-beta.8 -m "HA3D v0.2.64-lightmedia.5-beta.8"
+          git push origin v0.2.64-lightmedia.5-beta.8
+      - name: Create prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v0.2.64-lightmedia.5-beta.8 \
+            --prerelease \
+            --title "HA3D v0.2.64-lightmedia.5-beta.8" \
+            --notes "Permite usar fontes MJPEG com hostname mDNS local, como http://homeassistant.local:1984/api/stream.mjpeg?src=tv_sala_raw. O hostname .local é resolvido pelo Home Assistant e só é aceito quando todos os endereços retornados são privados, loopback ou link-local. Mantém o proxy autenticado, o Menu de cenas por objeto da beta.7, MJPEG, TV off = tela preta, X-Ray ocultando telas e quick control das lâmpadas. A estável v0.2.64-lightmedia.4 permanece preservada."
