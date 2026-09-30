@@ -34,21 +34,36 @@ function stateIsActive(entityId, state) {
   return !OFF_STATES.has(value);
 }
 
-function applyPower(panel, runtime) {
-  if (!runtime?.group || !runtime?.config) return;
-  if (panel?._editorMode) {
-    runtime.group.visible = runtime.config.enabled !== false;
+function syncVideoPlayback(runtime, powered) {
+  const video = runtime?.video;
+  if (!video) return;
+
+  // Power state owns playback. Keeping the media plane visible in editor mode
+  // must never allow a video to keep advancing while its TV/power entity is off.
+  if (!powered || runtime.config.enabled === false || runtime.config.autoplay === false) {
+    try { video.pause?.(); } catch (_error) {}
     return;
   }
 
+  try { video.play?.().catch?.(() => {}); } catch (_error) {}
+}
+
+function applyPower(panel, runtime) {
+  if (!runtime?.group || !runtime?.config) return;
+
   const powerEntity = defaultPowerEntity(runtime.config);
   const powered = !powerEntity || stateIsActive(powerEntity, panel?._hass?.states?.[powerEntity]);
-  runtime.group.visible = runtime.config.enabled !== false && powered;
 
-  if (runtime.video) {
-    if (powered && runtime.config.autoplay !== false) runtime.video.play?.().catch?.(() => {});
-    else runtime.video.pause?.();
+  // In editor mode keep the plane visible so it can still be positioned and
+  // resized, but playback must continue to follow the real power entity.
+  if (panel?._editorMode) {
+    runtime.group.visible = runtime.config.enabled !== false;
+    syncVideoPlayback(runtime, powered);
+    return;
   }
+
+  runtime.group.visible = runtime.config.enabled !== false && powered;
+  syncVideoPlayback(runtime, powered);
 }
 
 function syncAll(panel) {
@@ -88,8 +103,8 @@ function installPowerField(panel) {
   sourceRow?.insertAdjacentElement?.("afterend", row);
 }
 
-if (!proto.__ha3dMediaPanelPowerV1) {
-  proto.__ha3dMediaPanelPowerV1 = true;
+if (!proto.__ha3dMediaPanelPowerV2) {
+  proto.__ha3dMediaPanelPowerV2 = true;
 
   const oldRenderEditorForm = proto._renderEditorForm;
   proto._renderEditorForm = async function (...args) {
