@@ -70,4 +70,4 @@ import "./ha3d-editor-gizmo-hit-guard.js?v=editor-gizmo-hit-guard-1";
 import "./ha3d-virtual-light-entity-binding.js?v=virtual-light-entity-binding-2";
 import "./ha3d-no-empty-overlay.js?v=no-empty-overlay-1";
 import "./ha3d-light-marker-quick-control.js?v=light-marker-quick-control-3";
-import "./ha3d-object-scene-menu.js?v=object-scene-menu-1";
+import "./ha3d-object-scene-menu.js?v=object-scene-menu-2";
