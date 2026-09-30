@@ -64,6 +64,7 @@ import "./ha3d-view-zone-xray-fix.js?v=view-zone-xray-fix-1";
 import "./ha3d-media-panels.js?v=media-panels-1";
 import "./ha3d-media-upload.js?v=media-upload-1";
 import "./ha3d-media-panel-power.js?v=media-panel-power-3";
+import "./ha3d-mjpeg.js?v=mjpeg-1";
 import "./ha3d-virtual-light-position-fix.js?v=virtual-light-position-fix-1";
 import "./ha3d-editor-gizmo-hit-guard.js?v=editor-gizmo-hit-guard-1";
 import "./ha3d-virtual-light-entity-binding.js?v=virtual-light-entity-binding-2";
