@@ -22,12 +22,22 @@ function installExtraFields(panel) {
       <span class="ha3dHint">O modo cinematográfico usa somente luzes com este ícone visível.</span>
     </div>
     <div class="ha3dRow">
-      <label>Efeito do Spot</label>
+      <label>Efeito da luz</label>
       <select id="ha3dVlEffect">
         <option value="none" ${(config.effect || "none") === "none" ? "selected" : ""}>Nenhum</option>
         <option value="tv_flicker" ${config.effect === "tv_flicker" ? "selected" : ""}>Cintilação tipo TV</option>
       </select>
-      <span class="ha3dHint">A cintilação usa a mesma variação orgânica azul/roxo da TV e só atua em Spot Light.</span>
+      <span class="ha3dHint">Funciona em Point e Spot. Você escolhe as duas cores e o tempo de um ciclo completo.</span>
+    </div>
+    <div class="ha3dRow" id="ha3dVlFlickerOptions">
+      <label>Cores da cintilação</label>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <input id="ha3dVlFlickerColorA" type="color" value="${config.flicker_color_a || "#3a7bff"}" title="Cor A">
+        <input id="ha3dVlFlickerColorB" type="color" value="${config.flicker_color_b || "#754dff"}" title="Cor B">
+      </div>
+      <label>Tempo da cintilação (ms)</label>
+      <input id="ha3dVlFlickerPeriod" type="number" min="50" max="60000" step="50" value="${Number(config.flicker_period_ms) || 1200}">
+      <span class="ha3dHint">Ex.: 1200 ms = 1,2 s para completar a variação entre as cores.</span>
     </div>
   `;
 
@@ -55,6 +65,9 @@ if (!proto.__ha3dVirtualLightOptionsV1) {
         ...runtime.config,
         show_marker: Boolean(body.querySelector("#ha3dVlShowMarker")?.checked),
         effect: body.querySelector("#ha3dVlEffect")?.value === "tv_flicker" ? "tv_flicker" : "none",
+        flicker_color_a: body.querySelector("#ha3dVlFlickerColorA")?.value || "#3a7bff",
+        flicker_color_b: body.querySelector("#ha3dVlFlickerColorB")?.value || "#754dff",
+        flicker_period_ms: Math.max(50, Math.min(60000, Number(body.querySelector("#ha3dVlFlickerPeriod")?.value) || 1200)),
       };
     }
     return oldSaveVirtualLightForm?.call(this, id, ...args);
