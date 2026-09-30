@@ -27,7 +27,7 @@ from .storage import HA3DStore
 from .virtual_lights import HA3DVirtualLightsView
 
 
-FRONTEND_VERSION = "0.2.64-lightmedia.1"
+FRONTEND_VERSION = "0.2.64-lightmedia.2"
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -79,13 +79,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     else:
         runtime["owns_panel"] = False
 
+    async def _reload_entry() -> None:
+        await hass.config_entries.async_reload(entry.entry_id)
+
+    entry.async_on_unload(entry.add_update_listener(_update_listener))
+    runtime["reload_entry"] = _reload_entry
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Unload HA3D without touching user models or stored configuration."""
+    """Unload HA3D config entry."""
     runtime = hass.data.get(DOMAIN, {})
     if runtime.get("owns_panel") and frontend.async_panel_exists(hass, PANEL_URL_PATH):
         frontend.async_remove_panel(hass, PANEL_URL_PATH)
-    runtime["owns_panel"] = False
+    runtime.pop("reload_entry", None)
+    runtime.pop("owns_panel", None)
     return True
+
+
+async def _update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    await hass.config_entries.async_reload(entry.entry_id)
