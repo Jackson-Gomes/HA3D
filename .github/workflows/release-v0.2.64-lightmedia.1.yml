@@ -1,0 +1,65 @@
+name: Publish HA3D v0.2.64-lightmedia.1
+
+on:
+  push:
+    paths:
+      - .github/workflows/release-v0.2.64-lightmedia.1.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify light/media feature set
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          manifest=json.loads(Path('custom_components/ha3d/manifest.json').read_text())
+          assert manifest['version']=='0.2.64-lightmedia.1'
+          init=Path('custom_components/ha3d/__init__.py').read_text()
+          assert 'FRONTEND_VERSION = "0.2.64-lightmedia.1"' in init
+          entry=Path('custom_components/ha3d/frontend/ha3d-entry.js').read_text()
+          for marker in [
+              'ha3d-media-panels.js?v=media-panels-1',
+              'ha3d-virtual-light-position-fix.js?v=virtual-light-position-fix-1',
+              'ha3d-virtual-light-options.js?v=virtual-light-options-2',
+              'ha3d-virtual-light-effects.js?v=virtual-light-effects-2',
+          ]:
+              assert marker in entry
+          PY
+          node --check custom_components/ha3d/frontend/ha3d-media-panels.js
+          node --check custom_components/ha3d/frontend/ha3d-virtual-light-position-fix.js
+          node --check custom_components/ha3d/frontend/ha3d-virtual-light-options.js
+          node --check custom_components/ha3d/frontend/ha3d-virtual-light-effects.js
+      - name: Run validation
+        run: |
+          python -m compileall -q custom_components/ha3d
+          npm run check
+          npm test
+          python -m unittest discover -s tests -p 'test_*.py'
+      - name: Tag release
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a v0.2.64-lightmedia.1 -m "HA3D v0.2.64-lightmedia.1"
+          git push origin v0.2.64-lightmedia.1
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v0.2.64-lightmedia.1 \
+            --title "HA3D v0.2.64-lightmedia.1" \
+            --notes "Baseada diretamente na v0.2.64. Corrige o pivot e a seleção das luzes virtuais no editor; amplia a cintilação para Point e Spot com duas cores e período configurável; adiciona telas retangulares 3D com fonte por entidade do Home Assistant, URL de imagem ou URL de vídeo. Em modo entidade, tenta entity_picture, media_image_url e atributos equivalentes e usa app_name/source/media_title como fallback."
