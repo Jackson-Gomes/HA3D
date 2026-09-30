@@ -1,0 +1,77 @@
+name: Publish HA3D v0.2.64-lightmedia.5-beta.7
+
+on:
+  push:
+    paths:
+      - .github/workflows/release-v0.2.64-lightmedia.5-beta.7.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify opt-in object scene menus
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          version='0.2.64-lightmedia.5-beta.7'
+          manifest=json.loads(Path('custom_components/ha3d/manifest.json').read_text())
+          assert manifest['version']==version
+          init=Path('custom_components/ha3d/__init__.py').read_text()
+          assert f'FRONTEND_VERSION = "{version}"' in init
+          entry=Path('custom_components/ha3d/frontend/ha3d-entry.js').read_text()
+          assert 'ha3d-object-scene-menu.js?v=object-scene-menu-1' in entry
+          menu=Path('custom_components/ha3d/frontend/ha3d-object-scene-menu.js').read_text()
+          for marker in [
+              'Menu de cenas neste objeto',
+              'actions?.scene_menu',
+              'Salvar menu de cenas',
+              'Remover menu',
+              'scene", "turn_on"',
+              'QUICK_TAP_MS = 600',
+              'panel._ha3dSuppressTapUntil',
+              'oldRemoveEditorBinding',
+              '__ha3dObjectSceneMenuV1',
+          ]:
+              assert marker in menu, marker
+          # Existing beta.6 functionality must remain present.
+          assert 'ha3d-mjpeg.js?v=mjpeg-1' in entry
+          power=Path('custom_components/ha3d/frontend/ha3d-media-panel-power.js').read_text()
+          assert 'material.map = null' in power
+          assert 'contains("ha3d-idle-xray")' in power
+          PY
+          node --check custom_components/ha3d/frontend/ha3d-object-scene-menu.js
+          node --check custom_components/ha3d/frontend/ha3d-entry.js
+      - name: Run validation
+        run: |
+          python -m compileall -q custom_components/ha3d
+          npm run check
+          npm test
+          python -m unittest discover -s tests -p 'test_*.py'
+      - name: Tag release
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a v0.2.64-lightmedia.5-beta.7 -m "HA3D v0.2.64-lightmedia.5-beta.7"
+          git push origin v0.2.64-lightmedia.5-beta.7
+      - name: Create prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v0.2.64-lightmedia.5-beta.7 \
+            --prerelease \
+            --title "HA3D v0.2.64-lightmedia.5-beta.7" \
+            --notes "Adiciona Menu de cenas opcional por objeto 3D. No editor, qualquer objeto normal pode receber uma lista escolhida de scene.* sem precisar de binding de entidade. No modo normal, toque curto somente nesses objetos abre um menu com as cenas configuradas e executa scene.turn_on; segurar continua abrindo o editor e objetos sem menu permanecem inertes. Remover um binding de entidade preserva o menu de cenas independente. Mantém MJPEG ao vivo, TV off = tela preta, X-Ray ocultando telas e o quick control das lâmpadas. A estável v0.2.64-lightmedia.4 permanece preservada."
