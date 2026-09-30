@@ -28,6 +28,11 @@ function sceneMenuEntities(panel, key) {
     .slice(0, 40);
 }
 
+function configuredSceneMenuKeys(panel) {
+  return Object.keys(panel?._config?.advanced_bindings || {})
+    .filter((key) => sceneMenuEntities(panel, key).length > 0);
+}
+
 function allScenes(panel) {
   return Object.entries(panel?._hass?.states || {})
     .filter(([entity]) => entity.startsWith("scene."))
@@ -56,6 +61,14 @@ function ensureStyle(panel) {
     #ha3dObjectSceneMenu .ha3dObjectSceneAction{width:100%;min-height:40px;padding:8px 10px;border-radius:11px;text-align:left;background:#24262c;border:1px solid rgba(255,255,255,.10);color:var(--primary-text-color,#fff);font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     #ha3dObjectSceneMenu .ha3dObjectSceneAction:hover{background:#30333a}
     #ha3dObjectSceneMenu .ha3dObjectSceneAction:disabled{opacity:.55}
+    .ha3dObjectSceneMarker{
+      position:absolute;width:36px;height:36px;min-height:36px;padding:0;border-radius:50%;
+      transform:translate(-50%,-50%);display:grid;place-items:center;pointer-events:auto;
+      background:#202020e8;border:1px solid #777;color:#f5f5f5;box-shadow:0 3px 12px #0009;
+      backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);z-index:3;
+    }
+    .ha3dObjectSceneMarker:hover{background:#30333ae8;border-color:#aaa}
+    .ha3dObjectSceneMarker ha-icon{--mdc-icon-size:20px;width:20px;height:20px;pointer-events:none}
     #ha3dObjectSceneEditor{margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.12)}
     #ha3dObjectSceneEditor .ha3dObjectSceneChecks{display:grid;gap:5px;max-height:220px;overflow:auto;padding:6px;border:1px solid rgba(255,255,255,.12);border-radius:10px}
     #ha3dObjectSceneEditor .ha3dObjectSceneCheck{display:flex;gap:8px;align-items:center;min-height:30px;font-size:12px}
@@ -148,6 +161,113 @@ function openRuntimeMenu(panel, object, entities, event) {
   requestAnimationFrame(() => positionMenu(panel, menu, event.clientX, event.clientY));
 }
 
+function findObjectByKey(panel, key) {
+  let found = null;
+  const root = panel?._model || panel?._scene;
+  root?.traverse?.((object) => {
+    if (found || !isNormalModelObject(object)) return;
+    if (objectKey(object) === key) found = object;
+  });
+  return found;
+}
+
+function clearObjectSceneMarkers(panel) {
+  for (const binding of panel?._ha3dObjectSceneMarkers?.values?.() || []) {
+    binding.marker?.remove?.();
+  }
+  panel._ha3dObjectSceneMarkers = new Map();
+}
+
+function syncObjectSceneMarkers(panel) {
+  const host = panel?.shadowRoot?.querySelector("#markers");
+  if (!host) return;
+  ensureStyle(panel);
+  panel._ha3dObjectSceneMarkers ||= new Map();
+  const wanted = new Set(configuredSceneMenuKeys(panel));
+
+  for (const [key, binding] of panel._ha3dObjectSceneMarkers.entries()) {
+    if (!wanted.has(key) || !sceneMenuEntities(panel, key).length) {
+      binding.marker?.remove?.();
+      panel._ha3dObjectSceneMarkers.delete(key);
+    }
+  }
+
+  for (const key of wanted) {
+    const object = findObjectByKey(panel, key);
+    if (!object) continue;
+    let binding = panel._ha3dObjectSceneMarkers.get(key);
+    if (binding) {
+      binding.object = object;
+      binding.marker.title = `${key} — menu de cenas`;
+      continue;
+    }
+
+    const marker = document.createElement("button");
+    marker.type = "button";
+    marker.className = "ha3dObjectSceneMarker";
+    marker.title = `${key} — menu de cenas`;
+    marker.dataset.ha3dObjectSceneKey = key;
+    const icon = document.createElement("ha-icon");
+    icon.setAttribute("icon", "mdi:palette");
+    marker.appendChild(icon);
+
+    marker.addEventListener("pointerdown", (event) => {
+      event.stopPropagation();
+    }, true);
+    marker.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      event.stopPropagation();
+      const entities = sceneMenuEntities(panel, key);
+      if (!entities.length) return;
+      panel._ha3dSuppressTapUntil = performance.now() + 350;
+      openRuntimeMenu(panel, object, entities, event);
+    }, true);
+
+    host.appendChild(marker);
+    binding = { key, object, marker };
+    panel._ha3dObjectSceneMarkers.set(key, binding);
+  }
+}
+
+function updateObjectSceneMarkers(panel) {
+  const markers = panel?._ha3dObjectSceneMarkers;
+  const camera = panel?._camera;
+  const stage = panel?.shadowRoot?.querySelector("#stage");
+  if (!markers?.size || !camera || !stage) return;
+
+  const xray = panel.shadowRoot?.querySelector("#root")?.classList?.contains("ha3d-idle-xray");
+  const hidden = Boolean(panel._editorMode || xray);
+  panel._ha3dObjectSceneBox ||= new THREE.Box3();
+  panel._ha3dObjectScenePoint ||= new THREE.Vector3();
+  const box = panel._ha3dObjectSceneBox;
+  const point = panel._ha3dObjectScenePoint;
+
+  for (const binding of markers.values()) {
+    const marker = binding.marker;
+    const object = binding.object;
+    if (!marker || !object || hidden || object.visible === false) {
+      if (marker) marker.style.display = "none";
+      continue;
+    }
+
+    box.setFromObject(object);
+    if (!box.isEmpty()) box.getCenter(point);
+    else object.getWorldPosition(point);
+    point.project(camera);
+
+    const outside = point.z < -1 || point.z > 1 || point.x < -1.08 || point.x > 1.08 || point.y < -1.08 || point.y > 1.08;
+    if (outside) {
+      marker.style.display = "none";
+      continue;
+    }
+
+    marker.style.display = "grid";
+    marker.style.left = `${(point.x * 0.5 + 0.5) * stage.clientWidth}px`;
+    marker.style.top = `${(-point.y * 0.5 + 0.5) * stage.clientHeight}px`;
+  }
+}
+
 function editorObject(panel) {
   const object = panel?._selectedObject;
   return isNormalModelObject(object) ? object : null;
@@ -174,7 +294,7 @@ function installEditorUi(panel) {
 
   const hint = document.createElement("span");
   hint.className = "ha3dHint";
-  hint.textContent = "Opcional. Marque as cenas que devem aparecer ao tocar neste objeto no modo normal.";
+  hint.textContent = "Opcional. Marque as cenas. Um ícone de paleta aparecerá sobre este objeto no modo normal e abrirá o menu.";
   box.appendChild(hint);
 
   const checks = document.createElement("div");
@@ -294,8 +414,8 @@ function installCanvasTap(panel) {
   });
 }
 
-if (!proto.__ha3dObjectSceneMenuV1) {
-  proto.__ha3dObjectSceneMenuV1 = true;
+if (!proto.__ha3dObjectSceneMenuV2) {
+  proto.__ha3dObjectSceneMenuV2 = true;
 
   proto._saveObjectSceneMenu = async function (key = objectKey(editorObject(this))) {
     if (!key) return;
@@ -306,6 +426,7 @@ if (!proto.__ha3dObjectSceneMenuV1) {
     }
     try {
       await persistSceneMenu(this, key, entities);
+      syncObjectSceneMarkers(this);
       this._setStatus?.(`Menu de cenas salvo em ${key}`);
       await this._renderEditorForm?.();
     } catch (error) {
@@ -317,6 +438,7 @@ if (!proto.__ha3dObjectSceneMenuV1) {
     if (!key) return;
     try {
       await persistSceneMenu(this, key, []);
+      syncObjectSceneMarkers(this);
       this._setStatus?.(`Menu de cenas removido de ${key}`);
       await this._renderEditorForm?.();
     } catch (error) {
@@ -342,6 +464,7 @@ if (!proto.__ha3dObjectSceneMenuV1) {
     if (key && preserved.length && !sceneMenuEntities(this, key).length) {
       try {
         await persistSceneMenu(this, key, preserved);
+        syncObjectSceneMarkers(this);
         await this._renderEditorForm?.();
       } catch (error) {
         console.error("[HA3D] failed to preserve object scene menu", key, error);
@@ -355,14 +478,24 @@ if (!proto.__ha3dObjectSceneMenuV1) {
     const result = oldInitViewer?.apply(this, args);
     installCanvasTap(this);
     ensureRuntimeMenu(this);
+    queueMicrotask(() => syncObjectSceneMarkers(this));
     return result;
   };
 
   const oldLoadModel = proto._loadModel;
   proto._loadModel = async function (...args) {
+    clearObjectSceneMarkers(this);
     const result = await oldLoadModel?.apply(this, args);
     installCanvasTap(this);
     ensureRuntimeMenu(this);
+    syncObjectSceneMarkers(this);
+    return result;
+  };
+
+  const oldUpdateLightMarkers = proto._updateLightMarkers;
+  proto._updateLightMarkers = function (...args) {
+    const result = oldUpdateLightMarkers?.apply(this, args);
+    updateObjectSceneMarkers(this);
     return result;
   };
 
@@ -372,6 +505,7 @@ if (!proto.__ha3dObjectSceneMenuV1) {
     queueMicrotask(() => {
       installCanvasTap(this);
       ensureRuntimeMenu(this);
+      syncObjectSceneMarkers(this);
     });
     return result;
   };
