@@ -68,3 +68,4 @@ import "./ha3d-virtual-light-position-fix.js?v=virtual-light-position-fix-1";
 import "./ha3d-editor-gizmo-hit-guard.js?v=editor-gizmo-hit-guard-1";
 import "./ha3d-virtual-light-entity-binding.js?v=virtual-light-entity-binding-2";
 import "./ha3d-no-empty-overlay.js?v=no-empty-overlay-1";
+import "./ha3d-light-marker-quick-control.js?v=light-marker-quick-control-1";
