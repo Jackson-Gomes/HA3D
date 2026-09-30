@@ -23,12 +23,13 @@ from .http import HA3DAreasView, HA3DConfigView, HA3DModelUploadView
 from .marker_proximity import HA3DMarkerProximityView
 from .media_panels import HA3DMediaPanelsView
 from .media_upload import HA3DMediaUploadView
+from .mjpeg_proxy import HA3DMjpegFrameView, HA3DMjpegHub
 from .scene_assets import HA3DSceneAssetUploadView, HA3DSceneAssetsView
 from .storage import HA3DStore
 from .virtual_lights import HA3DVirtualLightsView
 
 
-FRONTEND_VERSION = "0.2.64-lightmedia.5-beta.5"
+FRONTEND_VERSION = "0.2.64-lightmedia.5-beta.6"
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -41,6 +42,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up HA3D from a config entry."""
     runtime = hass.data.setdefault(DOMAIN, {})
     store: HA3DStore = runtime.setdefault("store", HA3DStore(hass))
+    mjpeg_hub: HA3DMjpegHub = runtime.setdefault("mjpeg_hub", HA3DMjpegHub(hass))
 
     if not runtime.get("http_registered"):
         frontend_dir = Path(__file__).parent / "frontend"
@@ -53,6 +55,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.http.register_view(HA3DVirtualLightsView(store))
         hass.http.register_view(HA3DMediaPanelsView(store))
         hass.http.register_view(HA3DMediaUploadView(hass))
+        hass.http.register_view(HA3DMjpegFrameView(store, mjpeg_hub))
         hass.http.register_view(HA3DSceneAssetsView(hass, store))
         hass.http.register_view(HA3DSceneAssetUploadView(hass, store))
         hass.http.register_view(HA3DFloatingWidgetsView(store))
