@@ -1,0 +1,68 @@
+name: Publish HA3D v0.2.64-lightmedia.3
+
+on:
+  push:
+    paths:
+      - .github/workflows/release-v0.2.64-lightmedia.3.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify media upload and entity bindings
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          manifest=json.loads(Path('custom_components/ha3d/manifest.json').read_text())
+          assert manifest['version']=='0.2.64-lightmedia.3'
+          init=Path('custom_components/ha3d/__init__.py').read_text()
+          assert 'FRONTEND_VERSION = "0.2.64-lightmedia.3"' in init
+          assert 'HA3DMediaUploadView' in init
+          entry=Path('custom_components/ha3d/frontend/ha3d-entry.js').read_text()
+          for marker in [
+              'ha3d-media-upload.js?v=media-upload-1',
+              'ha3d-virtual-light-entity-binding.js?v=virtual-light-entity-binding-2',
+              'ha3d-editor-gizmo-hit-guard.js?v=editor-gizmo-hit-guard-1',
+          ]:
+              assert marker in entry
+          binding=Path('custom_components/ha3d/frontend/ha3d-virtual-light-entity-binding.js').read_text()
+          assert 'switch.' in binding and 'media_player.' in binding and 'light.' in binding
+          upload=Path('custom_components/ha3d/media_upload.py').read_text()
+          assert '/api/ha3d/media/upload' in upload
+          PY
+          node --check custom_components/ha3d/frontend/ha3d-media-upload.js
+          node --check custom_components/ha3d/frontend/ha3d-virtual-light-entity-binding.js
+          node --check custom_components/ha3d/frontend/ha3d-entry.js
+      - name: Run validation
+        run: |
+          python -m compileall -q custom_components/ha3d
+          npm run check
+          npm test
+          python -m unittest discover -s tests -p 'test_*.py'
+      - name: Tag release
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a v0.2.64-lightmedia.3 -m "HA3D v0.2.64-lightmedia.3"
+          git push origin v0.2.64-lightmedia.3
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v0.2.64-lightmedia.3 \
+            --title "HA3D v0.2.64-lightmedia.3" \
+            --notes "Atualização sobre v0.2.64-lightmedia.2. Luzes virtuais agora podem ser vinculadas a light.*, switch.* (incluindo dispositivos Zigbee expostos como switch) e media_player.*; media_player considera playing/paused/idle como ativo e off/standby como desligado. A Tela de mídia ganhou upload direto de imagem e vídeo, armazenado no Home Assistant em /local/ha3d/media/, mantendo também entidade e URL como fontes. A Tela continua editável com mover, rotacionar, escala pelo gizmo e largura/altura no formulário."
