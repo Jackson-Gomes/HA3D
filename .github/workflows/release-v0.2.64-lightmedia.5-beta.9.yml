@@ -1,0 +1,88 @@
+name: Publish HA3D v0.2.64-lightmedia.5-beta.9
+
+on:
+  push:
+    paths:
+      - .github/workflows/release-v0.2.64-lightmedia.5-beta.9.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify image-driven Spot lighting
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          version='0.2.64-lightmedia.5-beta.9'
+          manifest=json.loads(Path('custom_components/ha3d/manifest.json').read_text())
+          assert manifest['version']==version
+          init=Path('custom_components/ha3d/__init__.py').read_text()
+          assert f'FRONTEND_VERSION = "{version}"' in init
+          entry=Path('custom_components/ha3d/frontend/ha3d-entry.js').read_text()
+          assert 'ha3d-virtual-light-options.js?v=virtual-light-options-3' in entry
+          assert 'ha3d-virtual-light-effects.js?v=virtual-light-effects-3' in entry
+          backend=Path('custom_components/ha3d/virtual_lights.py').read_text()
+          assert '"none", "tv_flicker", "media_image"' in backend
+          assert '"media_panel_id"' in backend
+          options=Path('custom_components/ha3d/frontend/ha3d-virtual-light-options.js').read_text()
+          for marker in [
+              'Iluminação da imagem',
+              'ha3dVlMediaPanel',
+              'media_panel_id',
+              '__ha3dVirtualLightOptionsV2',
+          ]:
+              assert marker in options, marker
+          effects=Path('custom_components/ha3d/frontend/ha3d-virtual-light-effects.js').read_text()
+          for marker in [
+              'MEDIA_SAMPLE_MS = 200',
+              'SAMPLE_SIZE = 8',
+              'config.effect !== "media_image"',
+              'config.media_panel_id',
+              'runtime?._ha3dScreenPowered !== false',
+              'ctx.drawImage',
+              'getImageData',
+              'sample.luminance',
+              '__ha3dVirtualLightEffectsV3',
+          ]:
+              assert marker in effects, marker
+          # Existing beta.8 features must remain present.
+          assert 'ha3d-mjpeg.js?v=mjpeg-1' in entry
+          assert 'ha3d-object-scene-menu.js?v=object-scene-menu-1' in entry
+          PY
+          node --check custom_components/ha3d/frontend/ha3d-virtual-light-options.js
+          node --check custom_components/ha3d/frontend/ha3d-virtual-light-effects.js
+          node --check custom_components/ha3d/frontend/ha3d-entry.js
+      - name: Run validation
+        run: |
+          python -m compileall -q custom_components/ha3d
+          npm run check
+          npm test
+          python -m unittest discover -s tests -p 'test_*.py'
+      - name: Tag release
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a v0.2.64-lightmedia.5-beta.9 -m "HA3D v0.2.64-lightmedia.5-beta.9"
+          git push origin v0.2.64-lightmedia.5-beta.9
+      - name: Create prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v0.2.64-lightmedia.5-beta.9 \
+            --prerelease \
+            --title "HA3D v0.2.64-lightmedia.5-beta.9" \
+            --notes "Adiciona ao menu de efeitos da luz virtual a opção Iluminação da imagem. O Spot pode escolher uma Tela de mídia e passa a usar a cor média e a luminosidade da imagem/vídeo/MJPEG em tempo real; o campo Intensidade continua sendo o máximo do Spot e as transições são suavizadas. TV/tela desligada ou X-Ray apaga o efeito. Mantém Cintilação tipo TV, MJPEG com homeassistant.local, Menu de cenas por objeto, TV off = tela preta e quick control das lâmpadas. A estável v0.2.64-lightmedia.4 permanece preservada."
