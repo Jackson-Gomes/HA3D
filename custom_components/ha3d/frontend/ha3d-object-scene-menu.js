@@ -1,3 +1,5 @@
+import * as THREE from "https://esm.sh/three@0.180.0";
+
 const Panel = customElements.get("ha3d-panel");
 if (!Panel) throw new Error("HA3D panel was not registered");
 
@@ -453,8 +455,6 @@ if (!proto.__ha3dObjectSceneMenuV2) {
     return result;
   };
 
-  // Removing an entity binding must not accidentally remove an independently
-  // configured scene menu from the same object.
   const oldRemoveEditorBinding = proto._removeEditorBinding;
   proto._removeEditorBinding = async function (...args) {
     const object = editorObject(this);
