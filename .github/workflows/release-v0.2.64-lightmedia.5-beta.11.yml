@@ -1,0 +1,77 @@
+name: Publish HA3D v0.2.64-lightmedia.5-beta.11
+
+on:
+  push:
+    paths:
+      - .github/workflows/release-v0.2.64-lightmedia.5-beta.11.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify clickable object scene menu markers
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          version='0.2.64-lightmedia.5-beta.11'
+          manifest=json.loads(Path('custom_components/ha3d/manifest.json').read_text())
+          assert manifest['version']==version
+          init=Path('custom_components/ha3d/__init__.py').read_text()
+          assert f'FRONTEND_VERSION = "{version}"' in init
+          entry=Path('custom_components/ha3d/frontend/ha3d-entry.js').read_text()
+          assert 'ha3d-object-scene-menu.js?v=object-scene-menu-2' in entry
+          menu=Path('custom_components/ha3d/frontend/ha3d-object-scene-menu.js').read_text()
+          for marker in [
+              'import * as THREE',
+              'ha3dObjectSceneMarker',
+              'mdi:palette',
+              'syncObjectSceneMarkers',
+              'updateObjectSceneMarkers',
+              'new THREE.Box3()',
+              'point.project(camera)',
+              'openRuntimeMenu(panel, object, entities, event)',
+              '__ha3dObjectSceneMenuV2',
+          ]:
+              assert marker in menu, marker
+          # Previous beta features remain.
+          assert 'ha3d-virtual-light-effects.js?v=virtual-light-effects-4' in entry
+          assert 'ha3d-mjpeg.js?v=mjpeg-1' in entry
+          backend=Path('custom_components/ha3d/virtual_lights.py').read_text()
+          assert '"none", "tv_flicker", "media_image"' in backend
+          PY
+          node --check custom_components/ha3d/frontend/ha3d-object-scene-menu.js
+          node --check custom_components/ha3d/frontend/ha3d-entry.js
+      - name: Run validation
+        run: |
+          python -m compileall -q custom_components/ha3d
+          npm run check
+          npm test
+          python -m unittest discover -s tests -p 'test_*.py'
+      - name: Tag release
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a v0.2.64-lightmedia.5-beta.11 -m "HA3D v0.2.64-lightmedia.5-beta.11"
+          git push origin v0.2.64-lightmedia.5-beta.11
+      - name: Create prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v0.2.64-lightmedia.5-beta.11 \
+            --prerelease \
+            --title "HA3D v0.2.64-lightmedia.5-beta.11" \
+            --notes "Adiciona o marcador visual clicável que faltava no Menu de cenas por objeto. Todo objeto com cenas configuradas recebe um ícone flutuante mdi:palette posicionado sobre o centro do objeto; clicar no ícone abre diretamente o menu de cenas. O toque no próprio objeto continua funcionando como alternativa. O marcador some no Editor e no X-Ray. Mantém todos os recursos da beta.10. A estável v0.2.64-lightmedia.4 permanece preservada."
