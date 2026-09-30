@@ -28,27 +28,37 @@ function safeColor(value, fallback = "#ffffff") {
   catch (_error) { return new THREE.Color(fallback); }
 }
 
+function supportedBindingEntity(entityId) {
+  const value = String(entityId || "");
+  return value.startsWith("light.") || value.startsWith("switch.") || value.startsWith("media_player.");
+}
+
+function bindingType(entityId) {
+  if (entityId.startsWith("media_player.")) return "TV / Media Player";
+  if (entityId.startsWith("switch.")) return "Switch / Zigbee";
+  return "Luz";
+}
+
 function populateEntityList(panel) {
   const root = panel?.shadowRoot;
   const datalist = root?.querySelector("#ha3dVlEntities");
   if (!datalist) return;
 
   const states = Object.entries(panel?._hass?.states || {})
-    .filter(([entityId]) => entityId.startsWith("light.") || entityId.startsWith("media_player."))
+    .filter(([entityId]) => supportedBindingEntity(entityId))
     .sort(([a], [b]) => a.localeCompare(b));
 
   datalist.innerHTML = states.map(([entityId, state]) => {
     const friendly = state?.attributes?.friendly_name || entityId;
-    const type = entityId.startsWith("media_player.") ? "TV / Media Player" : "Luz";
-    return `<option value="${escapeHtml(entityId)}">${escapeHtml(`${friendly} · ${type}`)}</option>`;
+    return `<option value="${escapeHtml(entityId)}">${escapeHtml(`${friendly} · ${bindingType(entityId)}`)}</option>`;
   }).join("");
 
   const input = root.querySelector("#ha3dVlEntity");
-  if (input) input.placeholder = "light.sala ou media_player.tv_sala";
+  if (input) input.placeholder = "light.*, switch.* ou media_player.*";
 
   const row = input?.closest?.(".ha3dRow");
   const hint = row?.querySelector?.(".ha3dHint");
-  if (hint) hint.textContent = "Pode vincular a light.* ou media_player.*. Para TV, playing/paused/idle contam como ligada; off/standby como desligada.";
+  if (hint) hint.textContent = "Aceita light.*, switch.* (incluindo Zigbee) e media_player.*. Para TV, playing/paused/idle contam como ligada; off/standby como desligada.";
 }
 
 function applyMediaPlayerRuntime(panel, runtime, timeMs) {
@@ -92,8 +102,8 @@ function syncMediaPlayerLights(panel, timeMs = performance.now()) {
   }
 }
 
-if (!proto.__ha3dVirtualLightEntityBindingV1) {
-  proto.__ha3dVirtualLightEntityBindingV1 = true;
+if (!proto.__ha3dVirtualLightEntityBindingV2) {
+  proto.__ha3dVirtualLightEntityBindingV2 = true;
 
   const oldRenderEditorForm = proto._renderEditorForm;
   proto._renderEditorForm = async function (...args) {
@@ -102,10 +112,18 @@ if (!proto.__ha3dVirtualLightEntityBindingV1) {
     return result;
   };
 
+  const oldSelectForEditor = proto._selectForEditor;
+  proto._selectForEditor = function (...args) {
+    const result = oldSelectForEditor?.apply(this, args);
+    queueMicrotask(() => populateEntityList(this));
+    return result;
+  };
+
   const oldSyncLightStates = proto._syncLightStates;
   proto._syncLightStates = function (...args) {
     const result = oldSyncLightStates?.apply(this, args);
     syncMediaPlayerLights(this);
+    if (this._editorMode && this._selectedObject?.userData?.ha3dVirtualLightId) populateEntityList(this);
     return result;
   };
 
