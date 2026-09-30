@@ -34,11 +34,19 @@ function stateIsActive(entityId, state) {
   return !OFF_STATES.has(value);
 }
 
-function syncVideoPlayback(runtime, powered) {
+function isXrayActive(panel) {
+  return Boolean(panel?.shadowRoot?.querySelector("#root")?.classList?.contains("ha3d-idle-xray"));
+}
+
+function syncVideoPlayback(runtime, shouldPlay) {
   const video = runtime?.video;
   if (!video) return;
 
-  if (!powered || runtime.config.enabled === false || runtime.config.autoplay === false) {
+  const wanted = Boolean(shouldPlay && runtime.config.enabled !== false && runtime.config.autoplay !== false);
+  if (runtime._ha3dWantedPlaying === wanted) return;
+  runtime._ha3dWantedPlaying = wanted;
+
+  if (!wanted) {
     try { video.pause?.(); } catch (_error) {}
     return;
   }
@@ -47,11 +55,28 @@ function syncVideoPlayback(runtime, powered) {
 }
 
 function syncScreenBlackout(runtime, powered) {
-  if (!runtime?.material) return;
-  // Preserve the existing texture/video. Black material color hides it like a
-  // powered-off TV, so turning the entity back on restores the same source.
-  runtime.material.color?.setHex?.(powered ? 0xffffff : 0x000000);
-  runtime.material.needsUpdate = true;
+  const material = runtime?.material;
+  if (!material) return;
+
+  if (!powered) {
+    // Hard blackout: physically detach the image/video texture from the material.
+    // This prevents VideoTexture frames from remaining visible even if another
+    // runtime layer updates the texture while the TV entity is off.
+    if (material.map !== null) material.map = null;
+    material.color?.setHex?.(0x000000);
+    material.needsUpdate = true;
+    runtime._ha3dScreenPowered = false;
+    return;
+  }
+
+  // Restore whichever texture is currently owned by the media panel runtime.
+  // runtime.texture is updated by image/video source changes, so this also
+  // handles sources that loaded while the TV was powered off.
+  const wantedMap = runtime.texture || null;
+  if (material.map !== wantedMap) material.map = wantedMap;
+  material.color?.setHex?.(0xffffff);
+  material.needsUpdate = true;
+  runtime._ha3dScreenPowered = true;
 }
 
 function applyPower(panel, runtime) {
@@ -59,15 +84,31 @@ function applyPower(panel, runtime) {
 
   const powerEntity = defaultPowerEntity(runtime.config);
   const powered = !powerEntity || stateIsActive(powerEntity, panel?._hass?.states?.[powerEntity]);
+  const xray = isXrayActive(panel);
 
-  // The physical TV remains visible when off: only its display goes black.
-  runtime.group.visible = runtime.config.enabled !== false;
+  // X-Ray owns scene visibility: media screens must disappear completely while
+  // the scanner/X-Ray presentation is active.
+  runtime.group.visible = runtime.config.enabled !== false && !xray;
+
+  // Power state owns the screen contents independently of visibility.
   syncScreenBlackout(runtime, powered);
-  syncVideoPlayback(runtime, powered);
+  syncVideoPlayback(runtime, powered && !xray);
 }
 
 function syncAll(panel) {
   for (const runtime of panel?._ha3dMediaPanels?.values?.() || []) applyPower(panel, runtime);
+}
+
+function installFrameGuard(panel) {
+  const renderer = panel?._renderer;
+  if (!renderer?.render || renderer.__ha3dMediaPanelPowerFrameGuardV4) return;
+  renderer.__ha3dMediaPanelPowerFrameGuardV4 = true;
+
+  const originalRender = renderer.render.bind(renderer);
+  renderer.render = (...args) => {
+    syncAll(panel);
+    return originalRender(...args);
+  };
 }
 
 function powerOptions(panel) {
@@ -98,13 +139,20 @@ function installPowerField(panel) {
     <input id="ha3dMpPowerEntity" list="ha3dMpPowerEntities" autocomplete="off"
       placeholder="media_player.tv_da_sala" value="${escapeHtml(config.power_entity_id || "")}">
     <datalist id="ha3dMpPowerEntities">${powerOptions(panel)}</datalist>
-    <span class="ha3dHint">Opcional. TV/media player: playing, paused e idle = ligada; off, standby e unavailable = tela preta. Luz/switch: segue on/off.</span>
+    <span class="ha3dHint">Opcional. TV/media player: playing, paused e idle = ligada; off, standby e unavailable = tela preta. No X-Ray a tela desaparece.</span>
   `;
   sourceRow?.insertAdjacentElement?.("afterend", row);
 }
 
-if (!proto.__ha3dMediaPanelPowerV3) {
-  proto.__ha3dMediaPanelPowerV3 = true;
+if (!proto.__ha3dMediaPanelPowerV4) {
+  proto.__ha3dMediaPanelPowerV4 = true;
+
+  const oldInitViewer = proto._initViewer;
+  proto._initViewer = function (...args) {
+    const result = oldInitViewer?.apply(this, args);
+    installFrameGuard(this);
+    return result;
+  };
 
   const oldRenderEditorForm = proto._renderEditorForm;
   proto._renderEditorForm = async function (...args) {
@@ -155,7 +203,18 @@ if (!proto.__ha3dMediaPanelPowerV3) {
   const oldLoadModel = proto._loadModel;
   proto._loadModel = async function (...args) {
     const result = await oldLoadModel?.apply(this, args);
+    installFrameGuard(this);
     syncAll(this);
+    return result;
+  };
+
+  const oldConnected = proto.connectedCallback;
+  proto.connectedCallback = function (...args) {
+    const result = oldConnected?.apply(this, args);
+    queueMicrotask(() => {
+      installFrameGuard(this);
+      syncAll(this);
+    });
     return result;
   };
 }
