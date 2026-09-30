@@ -61,7 +61,7 @@ def _is_valid_media_panel(value: Any) -> bool:
         return False
     if not _is_text(value.get("name", panel_id), 120, allow_empty=False):
         return False
-    if value.get("source_type", "entity") not in {"entity", "image", "video"}:
+    if value.get("source_type", "entity") not in {"entity", "image", "video", "mjpeg"}:
         return False
 
     entity_id = value.get("entity_id")
@@ -112,7 +112,7 @@ def _is_valid_media_panels(value: Any) -> bool:
 
 
 class HA3DMediaPanelsView(HomeAssistantView):
-    """Persist runtime-created image/video planes for the HA3D scene."""
+    """Persist runtime-created image/video/MJPEG planes for the HA3D scene."""
 
     url = "/api/ha3d/media_panels"
     name = "api:ha3d:media_panels"
