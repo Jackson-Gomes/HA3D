@@ -6,6 +6,8 @@ const proto = Panel.prototype;
 
 const DEFAULT_A = "#3a7bff";
 const DEFAULT_B = "#754dff";
+const MEDIA_SAMPLE_MS = 200;
+const SAMPLE_SIZE = 8;
 
 function effectiveState(panel, config) {
   if (config?.entity_id) {
@@ -24,11 +26,128 @@ function safeColor(value, fallback) {
   try { return new THREE.Color(value || fallback); } catch (_error) { return new THREE.Color(fallback); }
 }
 
+function mediaSourceElement(runtime) {
+  if (runtime?._ha3dMjpeg?.image?.complete && runtime._ha3dMjpeg.image.naturalWidth > 0) {
+    return runtime._ha3dMjpeg.image;
+  }
+  if (runtime?.video && runtime.video.readyState >= 2 && runtime.video.videoWidth > 0) {
+    return runtime.video;
+  }
+  const image = runtime?.texture?.image;
+  if (!image) return null;
+  if (typeof HTMLImageElement !== "undefined" && image instanceof HTMLImageElement) {
+    return image.complete && image.naturalWidth > 0 ? image : null;
+  }
+  if (typeof HTMLCanvasElement !== "undefined" && image instanceof HTMLCanvasElement) return image;
+  if (typeof ImageBitmap !== "undefined" && image instanceof ImageBitmap) return image;
+  return null;
+}
+
+function mediaIsActive(runtime) {
+  return Boolean(
+    runtime?.config?.enabled !== false
+    && runtime?.group?.visible !== false
+    && runtime?._ha3dScreenPowered !== false,
+  );
+}
+
+function sampleMedia(runtime, timeMs) {
+  if (!mediaIsActive(runtime)) return null;
+  const cached = runtime._ha3dMediaLightSample;
+  if (cached && Number(timeMs) - cached.at < MEDIA_SAMPLE_MS) return cached.value;
+
+  const source = mediaSourceElement(runtime);
+  if (!source) return null;
+
+  let canvas = runtime._ha3dMediaLightCanvas;
+  if (!canvas) {
+    canvas = document.createElement("canvas");
+    canvas.width = SAMPLE_SIZE;
+    canvas.height = SAMPLE_SIZE;
+    runtime._ha3dMediaLightCanvas = canvas;
+  }
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return null;
+
+  try {
+    ctx.clearRect(0, 0, SAMPLE_SIZE, SAMPLE_SIZE);
+    ctx.drawImage(source, 0, 0, SAMPLE_SIZE, SAMPLE_SIZE);
+    const data = ctx.getImageData(0, 0, SAMPLE_SIZE, SAMPLE_SIZE).data;
+    let r = 0;
+    let g = 0;
+    let b = 0;
+    let weight = 0;
+    for (let index = 0; index < data.length; index += 4) {
+      const alpha = data[index + 3] / 255;
+      if (alpha <= 0) continue;
+      r += data[index] * alpha;
+      g += data[index + 1] * alpha;
+      b += data[index + 2] * alpha;
+      weight += alpha;
+    }
+    if (!(weight > 0)) return null;
+    r /= weight;
+    g /= weight;
+    b /= weight;
+    const luminance = Math.max(0, Math.min(1, (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255));
+    const value = { r: r / 255, g: g / 255, b: b / 255, luminance };
+    runtime._ha3dMediaLightSample = { at: Number(timeMs), value };
+    return value;
+  } catch (_error) {
+    runtime._ha3dMediaLightSample = { at: Number(timeMs), value: null };
+    return null;
+  }
+}
+
+function updateMediaImageEffect(panel, runtime, timeMs) {
+  const config = runtime?.config;
+  const light = runtime?.light;
+  if (!config || !light || config.effect !== "media_image") return false;
+
+  const state = effectiveState(panel, config);
+  const media = config.media_panel_id ? panel?._ha3dMediaPanels?.get?.(config.media_panel_id) : null;
+  if (!state.on || !mediaIsActive(media)) {
+    light.intensity = 0;
+    light.castShadow = false;
+    return true;
+  }
+
+  const sample = sampleMedia(media, timeMs);
+  if (!sample) {
+    light.intensity = 0;
+    light.castShadow = false;
+    return true;
+  }
+
+  const targetIntensity = Math.max(0, Number(config.intensity) || 0) * state.brightness * sample.luminance;
+  const effectState = runtime._ha3dMediaImageEffect || {
+    color: new THREE.Color().setRGB(sample.r, sample.g, sample.b, THREE.SRGBColorSpace),
+    intensity: targetIntensity,
+    at: Number(timeMs),
+  };
+  runtime._ha3dMediaImageEffect = effectState;
+
+  const elapsed = Math.max(1, Math.min(250, Number(timeMs) - Number(effectState.at || timeMs)));
+  const alpha = 1 - Math.exp(-elapsed / 140);
+  const targetColor = new THREE.Color().setRGB(sample.r, sample.g, sample.b, THREE.SRGBColorSpace);
+  effectState.color.lerp(targetColor, alpha);
+  effectState.intensity += (targetIntensity - effectState.intensity) * alpha;
+  effectState.at = Number(timeMs);
+
+  light.color.copy(effectState.color);
+  light.intensity = Math.max(0, effectState.intensity);
+  light.castShadow = Boolean(config.cast_shadow && light.intensity > 0);
+  return true;
+}
+
 function updateEffects(panel, timeMs) {
   for (const runtime of panel?._ha3dVirtualLights?.values?.() || []) {
     const config = runtime?.config;
     const light = runtime?.light;
-    if (!config || !light || config.effect !== "tv_flicker") continue;
+    if (!config || !light) continue;
+
+    if (updateMediaImageEffect(panel, runtime, timeMs)) continue;
+    if (config.effect !== "tv_flicker") continue;
 
     const state = effectiveState(panel, config);
     if (!state.on) {
@@ -57,8 +176,8 @@ function updateEffects(panel, timeMs) {
   }
 }
 
-if (!proto.__ha3dVirtualLightEffectsV2) {
-  proto.__ha3dVirtualLightEffectsV2 = true;
+if (!proto.__ha3dVirtualLightEffectsV3) {
+  proto.__ha3dVirtualLightEffectsV3 = true;
 
   const oldUpdateLightMarkers = proto._updateLightMarkers;
   proto._updateLightMarkers = function (...args) {
