@@ -38,8 +38,6 @@ function syncVideoPlayback(runtime, powered) {
   const video = runtime?.video;
   if (!video) return;
 
-  // Power state owns playback. Keeping the media plane visible in editor mode
-  // must never allow a video to keep advancing while its TV/power entity is off.
   if (!powered || runtime.config.enabled === false || runtime.config.autoplay === false) {
     try { video.pause?.(); } catch (_error) {}
     return;
@@ -48,21 +46,23 @@ function syncVideoPlayback(runtime, powered) {
   try { video.play?.().catch?.(() => {}); } catch (_error) {}
 }
 
+function syncScreenBlackout(runtime, powered) {
+  if (!runtime?.material) return;
+  // Preserve the existing texture/video. Black material color hides it like a
+  // powered-off TV, so turning the entity back on restores the same source.
+  runtime.material.color?.setHex?.(powered ? 0xffffff : 0x000000);
+  runtime.material.needsUpdate = true;
+}
+
 function applyPower(panel, runtime) {
   if (!runtime?.group || !runtime?.config) return;
 
   const powerEntity = defaultPowerEntity(runtime.config);
   const powered = !powerEntity || stateIsActive(powerEntity, panel?._hass?.states?.[powerEntity]);
 
-  // In editor mode keep the plane visible so it can still be positioned and
-  // resized, but playback must continue to follow the real power entity.
-  if (panel?._editorMode) {
-    runtime.group.visible = runtime.config.enabled !== false;
-    syncVideoPlayback(runtime, powered);
-    return;
-  }
-
-  runtime.group.visible = runtime.config.enabled !== false && powered;
+  // The physical TV remains visible when off: only its display goes black.
+  runtime.group.visible = runtime.config.enabled !== false;
+  syncScreenBlackout(runtime, powered);
   syncVideoPlayback(runtime, powered);
 }
 
@@ -98,13 +98,13 @@ function installPowerField(panel) {
     <input id="ha3dMpPowerEntity" list="ha3dMpPowerEntities" autocomplete="off"
       placeholder="media_player.tv_da_sala" value="${escapeHtml(config.power_entity_id || "")}">
     <datalist id="ha3dMpPowerEntities">${powerOptions(panel)}</datalist>
-    <span class="ha3dHint">Opcional. TV/media player: playing, paused e idle = ligada; off, standby e unavailable = desligada. Luz/switch: segue on/off.</span>
+    <span class="ha3dHint">Opcional. TV/media player: playing, paused e idle = ligada; off, standby e unavailable = tela preta. Luz/switch: segue on/off.</span>
   `;
   sourceRow?.insertAdjacentElement?.("afterend", row);
 }
 
-if (!proto.__ha3dMediaPanelPowerV2) {
-  proto.__ha3dMediaPanelPowerV2 = true;
+if (!proto.__ha3dMediaPanelPowerV3) {
+  proto.__ha3dMediaPanelPowerV3 = true;
 
   const oldRenderEditorForm = proto._renderEditorForm;
   proto._renderEditorForm = async function (...args) {
