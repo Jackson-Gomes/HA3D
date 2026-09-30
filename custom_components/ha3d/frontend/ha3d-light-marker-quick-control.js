@@ -4,160 +4,184 @@ if (!Panel) throw new Error("HA3D panel was not registered");
 const proto = Panel.prototype;
 const HOLD_MS = 550;
 const MOVE_CANCEL_PX = 10;
-const SUPPRESS_CLICK_MS = 900;
 
 function isLightEntity(entityId) {
   return typeof entityId === "string" && entityId.startsWith("light.");
 }
 
-function cleanLegacyMarker(panel, binding) {
-  const original = binding?.marker;
-  const entityId = binding?.entity;
-  if (!original || !isLightEntity(entityId)) return original;
-  if (original.dataset.ha3dLightQuickControlClean === "2") return original;
-
-  // Clone the marker DOM node to deliberately drop every legacy event listener.
-  // The original HA3D marker registered click => more-info unconditionally;
-  // trying to stop that listener later proved browser/order dependent on touch.
-  const marker = original.cloneNode(true);
-  marker.dataset.ha3dLightQuickControlClean = "2";
-  original.replaceWith(marker);
-  binding.marker = marker;
-
-  // cloneNode does not copy JS properties assigned to HA custom elements.
-  // Restore the state object so the native HA icon remains state-aware.
-  const stateIcon = marker.querySelector?.("ha-state-icon");
-  const stateObj = panel?._hass?.states?.[entityId];
-  if (stateIcon && stateObj) stateIcon.stateObj = stateObj;
-
-  return marker;
+function bindingForMarker(panel, marker) {
+  if (!marker) return null;
+  for (const binding of panel?._lightBindings?.values?.() || []) {
+    if (binding?.marker === marker && isLightEntity(binding?.entity)) return binding;
+  }
+  return null;
 }
 
-function installLightMarkerQuickControl(panel, binding) {
+function markerFromEvent(event) {
+  const target = event?.target;
+  return target?.closest?.(".lightMarker") || null;
+}
+
+async function toggleLight(panel, binding) {
   const entityId = binding?.entity;
   if (!isLightEntity(entityId)) return;
+  const state = panel?._hass?.states?.[entityId];
+  if (!state || state.state === "unavailable" || state.state === "unknown") {
+    panel?._setStatus?.(`${binding.name || entityId} indisponível`);
+    return;
+  }
 
-  const marker = cleanLegacyMarker(panel, binding);
-  if (!marker || marker.dataset.ha3dLightQuickControl === "2") return;
+  try {
+    await panel._hass.callService("light", "toggle", { entity_id: entityId });
+  } catch (error) {
+    console.error("[HA3D] light quick toggle", entityId, error);
+    panel?._setStatus?.(`Falha ao alternar ${binding.name || entityId}`);
+  }
+}
 
-  marker.dataset.ha3dLightQuickControl = "2";
-  marker.style.touchAction = "manipulation";
-  marker.setAttribute("aria-label", `${binding.name || entityId}: toque para ligar/desligar; segure para abrir controles`);
+function installDelegatedQuickControl(panel) {
+  const root = panel?.shadowRoot;
+  if (!root || root.__ha3dLightQuickControlV3) return;
+  root.__ha3dLightQuickControlV3 = true;
 
-  let timer = 0;
-  let pointerId = null;
+  let activePointerId = null;
+  let activeMarker = null;
+  let activeBinding = null;
   let startX = 0;
   let startY = 0;
-  let holdFired = false;
   let moved = false;
-  let suppressClickUntil = 0;
+  let holdFired = false;
+  let timer = 0;
 
   const clearTimer = () => {
     if (timer) window.clearTimeout(timer);
     timer = 0;
   };
 
-  const resetPointer = () => {
+  const reset = () => {
     clearTimer();
-    pointerId = null;
-  };
-
-  const toggleLight = async () => {
-    const state = panel._hass?.states?.[entityId];
-    if (!state || state.state === "unavailable" || state.state === "unknown") {
-      panel._setStatus?.(`${binding.name || entityId} indisponível`);
-      return;
-    }
-
-    try {
-      marker.dataset.ha3dQuickPending = "1";
-      await panel._hass.callService("light", "toggle", { entity_id: entityId });
-    } catch (error) {
-      console.error("[HA3D] light quick toggle", entityId, error);
-      panel._setStatus?.(`Falha ao alternar ${binding.name || entityId}`);
-    } finally {
-      delete marker.dataset.ha3dQuickPending;
-    }
-  };
-
-  marker.addEventListener("pointerdown", (event) => {
-    if (event.button > 0 || !event.isPrimary) return;
-
-    event.stopPropagation();
-    holdFired = false;
+    activePointerId = null;
+    activeMarker = null;
+    activeBinding = null;
     moved = false;
-    pointerId = event.pointerId;
+    holdFired = false;
+  };
+
+  root.addEventListener("pointerdown", (event) => {
+    if (event.button > 0 || !event.isPrimary) return;
+    const marker = markerFromEvent(event);
+    const binding = bindingForMarker(panel, marker);
+    if (!binding) return;
+
+    // Capture the gesture before any marker-level legacy listener can run.
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    event.stopPropagation();
+
+    activePointerId = event.pointerId;
+    activeMarker = marker;
+    activeBinding = binding;
     startX = event.clientX;
     startY = event.clientY;
+    moved = false;
+    holdFired = false;
     clearTimer();
 
     try { marker.setPointerCapture?.(event.pointerId); } catch (_error) {}
 
     timer = window.setTimeout(() => {
       timer = 0;
-      if (pointerId !== event.pointerId || moved) return;
+      if (activePointerId !== event.pointerId || moved || !activeBinding) return;
       holdFired = true;
-      suppressClickUntil = performance.now() + SUPPRESS_CLICK_MS;
-      panel._openNativeMoreInfo?.(entityId);
+      panel._openNativeMoreInfo?.(activeBinding.entity);
     }, HOLD_MS);
-  });
+  }, true);
 
-  marker.addEventListener("pointermove", (event) => {
-    if (pointerId !== event.pointerId || holdFired) return;
+  root.addEventListener("pointermove", (event) => {
+    if (activePointerId !== event.pointerId || !activeBinding || holdFired) return;
     if (Math.hypot(event.clientX - startX, event.clientY - startY) > MOVE_CANCEL_PX) {
       moved = true;
       clearTimer();
     }
-  });
+  }, true);
 
-  marker.addEventListener("pointerup", async (event) => {
-    if (pointerId !== event.pointerId) return;
-    event.preventDefault();
-    event.stopPropagation();
-    clearTimer();
-    try { marker.releasePointerCapture?.(event.pointerId); } catch (_error) {}
-    pointerId = null;
+  root.addEventListener("pointerup", async (event) => {
+    if (activePointerId !== event.pointerId || !activeBinding) return;
 
-    if (!holdFired && !moved) {
-      suppressClickUntil = performance.now() + SUPPRESS_CLICK_MS;
-      await toggleLight();
-    }
-    holdFired = false;
-  });
-
-  marker.addEventListener("pointercancel", () => {
-    moved = true;
-    resetPointer();
-  });
-  marker.addEventListener("lostpointercapture", () => clearTimer());
-
-  // Never let the browser synthesize a second action from pointer/touch.
-  marker.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopImmediatePropagation();
     event.stopPropagation();
-    if (performance.now() < suppressClickUntil) return;
+    clearTimer();
+
+    const marker = activeMarker;
+    const binding = activeBinding;
+    const shouldToggle = !holdFired && !moved;
+
+    try { marker?.releasePointerCapture?.(event.pointerId); } catch (_error) {}
+    reset();
+
+    if (shouldToggle) await toggleLight(panel, binding);
   }, true);
 
-  marker.addEventListener("contextmenu", (event) => {
+  root.addEventListener("pointercancel", (event) => {
+    if (activePointerId !== event.pointerId) return;
     event.preventDefault();
+    event.stopImmediatePropagation();
+    reset();
+  }, true);
+
+  // This is the hard stop for the old marker click => more-info behavior.
+  // Because it runs on the shadow root during capture, target listeners never see it.
+  root.addEventListener("click", (event) => {
+    const marker = markerFromEvent(event);
+    const binding = bindingForMarker(panel, marker);
+    if (!binding) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
     event.stopPropagation();
-  });
+  }, true);
+
+  root.addEventListener("contextmenu", (event) => {
+    const marker = markerFromEvent(event);
+    const binding = bindingForMarker(panel, marker);
+    if (!binding) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    event.stopPropagation();
+  }, true);
 }
 
-function installAll(panel) {
+function annotateLightMarkers(panel) {
   for (const binding of panel?._lightBindings?.values?.() || []) {
-    installLightMarkerQuickControl(panel, binding);
+    if (!isLightEntity(binding?.entity) || !binding?.marker) continue;
+    binding.marker.dataset.ha3dLightQuickControl = "3";
+    binding.marker.style.touchAction = "manipulation";
+    binding.marker.setAttribute(
+      "aria-label",
+      `${binding.name || binding.entity}: toque para ligar/desligar; segure para abrir controles`,
+    );
   }
 }
 
-if (!proto.__ha3dLightMarkerQuickControlV2) {
-  proto.__ha3dLightMarkerQuickControlV2 = true;
+function installAll(panel) {
+  installDelegatedQuickControl(panel);
+  annotateLightMarkers(panel);
+}
+
+if (!proto.__ha3dLightMarkerQuickControlV3) {
+  proto.__ha3dLightMarkerQuickControlV3 = true;
+
+  const originalRenderShell = proto._renderShell;
+  proto._renderShell = function (...args) {
+    const result = originalRenderShell?.apply(this, args);
+    installAll(this);
+    return result;
+  };
 
   const originalMakeLightMarker = proto._makeLightMarker;
   proto._makeLightMarker = function (...args) {
     const binding = originalMakeLightMarker.apply(this, args);
-    installLightMarkerQuickControl(this, binding);
+    installAll(this);
     return binding;
   };
 
