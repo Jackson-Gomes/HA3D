@@ -26,6 +26,10 @@ function safeColor(value, fallback) {
   try { return new THREE.Color(value || fallback); } catch (_error) { return new THREE.Color(fallback); }
 }
 
+function clamp01(value) {
+  return Math.max(0, Math.min(1, Number(value) || 0));
+}
+
 function mediaSourceElement(runtime) {
   if (runtime?._ha3dMjpeg?.image?.complete && runtime._ha3dMjpeg.image.naturalWidth > 0) {
     return runtime._ha3dMjpeg.image;
@@ -73,24 +77,62 @@ function sampleMedia(runtime, timeMs) {
     ctx.clearRect(0, 0, SAMPLE_SIZE, SAMPLE_SIZE);
     ctx.drawImage(source, 0, 0, SAMPLE_SIZE, SAMPLE_SIZE);
     const data = ctx.getImageData(0, 0, SAMPLE_SIZE, SAMPLE_SIZE).data;
-    let r = 0;
-    let g = 0;
-    let b = 0;
-    let weight = 0;
+
+    // Luminance follows the whole frame, while color is deliberately weighted
+    // toward chromatic pixels. A plain RGB average makes movies with white text,
+    // bright skies or neutral backgrounds collapse to an almost white Spot.
+    let lumSum = 0;
+    let alphaSum = 0;
+    let wr = 0;
+    let wg = 0;
+    let wb = 0;
+    let colorWeight = 0;
+    let saturationSum = 0;
+
     for (let index = 0; index < data.length; index += 4) {
       const alpha = data[index + 3] / 255;
       if (alpha <= 0) continue;
-      r += data[index] * alpha;
-      g += data[index + 1] * alpha;
-      b += data[index + 2] * alpha;
-      weight += alpha;
+
+      const r = data[index] / 255;
+      const g = data[index + 1] / 255;
+      const b = data[index + 2] / 255;
+      const max = Math.max(r, g, b);
+      const min = Math.min(r, g, b);
+      const saturation = max > 0.001 ? (max - min) / max : 0;
+      const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+
+      lumSum += luminance * alpha;
+      alphaSum += alpha;
+      saturationSum += saturation * alpha;
+
+      // Neutral pixels keep a small vote, but saturated pixels dominate color.
+      // Dark colored pixels still count, without allowing black to steer hue.
+      const chromaWeight = alpha
+        * (0.08 + 3.4 * Math.pow(saturation, 1.7))
+        * (0.28 + 0.72 * Math.sqrt(max));
+      wr += r * chromaWeight;
+      wg += g * chromaWeight;
+      wb += b * chromaWeight;
+      colorWeight += chromaWeight;
     }
-    if (!(weight > 0)) return null;
-    r /= weight;
-    g /= weight;
-    b /= weight;
-    const luminance = Math.max(0, Math.min(1, (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255));
-    const value = { r: r / 255, g: g / 255, b: b / 255, luminance };
+
+    if (!(alphaSum > 0) || !(colorWeight > 0)) return null;
+
+    const luminance = clamp01(lumSum / alphaSum);
+    let r = clamp01(wr / colorWeight);
+    let g = clamp01(wg / colorWeight);
+    let b = clamp01(wb / colorWeight);
+
+    // Give the light a little more chroma than the raw frame average. This is
+    // intentionally modest: it should feel like light from the image, not RGB FX.
+    const averageSaturation = clamp01(saturationSum / alphaSum);
+    const boost = 1.15 + 0.65 * averageSaturation;
+    const gray = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    r = clamp01(gray + (r - gray) * boost);
+    g = clamp01(gray + (g - gray) * boost);
+    b = clamp01(gray + (b - gray) * boost);
+
+    const value = { r, g, b, luminance };
     runtime._ha3dMediaLightSample = { at: Number(timeMs), value };
     return value;
   } catch (_error) {
@@ -176,8 +218,8 @@ function updateEffects(panel, timeMs) {
   }
 }
 
-if (!proto.__ha3dVirtualLightEffectsV3) {
-  proto.__ha3dVirtualLightEffectsV3 = true;
+if (!proto.__ha3dVirtualLightEffectsV4) {
+  proto.__ha3dVirtualLightEffectsV4 = true;
 
   const oldUpdateLightMarkers = proto._updateLightMarkers;
   proto._updateLightMarkers = function (...args) {
