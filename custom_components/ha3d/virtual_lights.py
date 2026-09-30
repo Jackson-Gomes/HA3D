@@ -47,6 +47,9 @@ def _is_valid_virtual_light(value: Any) -> bool:
         "enabled",
         "show_marker",
         "effect",
+        "flicker_color_a",
+        "flicker_color_b",
+        "flicker_period_ms",
     }
     if set(value) - allowed:
         return False
@@ -91,6 +94,11 @@ def _is_valid_virtual_light(value: Any) -> bool:
     if "show_marker" in value and not isinstance(value["show_marker"], bool):
         return False
     if value.get("effect", "none") not in {"none", "tv_flicker"}:
+        return False
+    for key in ("flicker_color_a", "flicker_color_b"):
+        if key in value and (not isinstance(value[key], str) or not _COLOR_RE.fullmatch(value[key])):
+            return False
+    if "flicker_period_ms" in value and not _is_number(value["flicker_period_ms"], 50, 60_000):
         return False
 
     return True
