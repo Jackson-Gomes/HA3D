@@ -38,6 +38,7 @@ def _is_valid_media_panel(value: Any) -> bool:
         "name",
         "source_type",
         "entity_id",
+        "power_entity_id",
         "image_attribute",
         "url",
         "position",
@@ -65,6 +66,12 @@ def _is_valid_media_panel(value: Any) -> bool:
 
     entity_id = value.get("entity_id")
     if entity_id is not None and (not isinstance(entity_id, str) or not _ENTITY_ID_RE.fullmatch(entity_id)):
+        return False
+
+    power_entity_id = value.get("power_entity_id")
+    if power_entity_id is not None and (
+        not isinstance(power_entity_id, str) or not _ENTITY_ID_RE.fullmatch(power_entity_id)
+    ):
         return False
 
     if not _is_text(value.get("image_attribute", ""), 120):
