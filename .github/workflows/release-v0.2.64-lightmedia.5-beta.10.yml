@@ -1,0 +1,75 @@
+name: Publish HA3D v0.2.64-lightmedia.5-beta.10
+
+on:
+  push:
+    paths:
+      - .github/workflows/release-v0.2.64-lightmedia.5-beta.10.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify improved media color extraction
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          version='0.2.64-lightmedia.5-beta.10'
+          manifest=json.loads(Path('custom_components/ha3d/manifest.json').read_text())
+          assert manifest['version']==version
+          init=Path('custom_components/ha3d/__init__.py').read_text()
+          assert f'FRONTEND_VERSION = "{version}"' in init
+          entry=Path('custom_components/ha3d/frontend/ha3d-entry.js').read_text()
+          assert 'ha3d-virtual-light-effects.js?v=virtual-light-effects-4' in entry
+          effects=Path('custom_components/ha3d/frontend/ha3d-virtual-light-effects.js').read_text()
+          for marker in [
+              'MEDIA_SAMPLE_MS = 200',
+              'SAMPLE_SIZE = 8',
+              'chromaWeight',
+              'averageSaturation',
+              'Neutral pixels keep a small vote',
+              '__ha3dVirtualLightEffectsV4',
+          ]:
+              assert marker in effects, marker
+          # Existing beta.9 features must remain present.
+          backend=Path('custom_components/ha3d/virtual_lights.py').read_text()
+          assert '"none", "tv_flicker", "media_image"' in backend
+          assert '"media_panel_id"' in backend
+          assert 'ha3d-mjpeg.js?v=mjpeg-1' in entry
+          assert 'ha3d-object-scene-menu.js?v=object-scene-menu-1' in entry
+          PY
+          node --check custom_components/ha3d/frontend/ha3d-virtual-light-effects.js
+          node --check custom_components/ha3d/frontend/ha3d-entry.js
+      - name: Run validation
+        run: |
+          python -m compileall -q custom_components/ha3d
+          npm run check
+          npm test
+          python -m unittest discover -s tests -p 'test_*.py'
+      - name: Tag release
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a v0.2.64-lightmedia.5-beta.10 -m "HA3D v0.2.64-lightmedia.5-beta.10"
+          git push origin v0.2.64-lightmedia.5-beta.10
+      - name: Create prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v0.2.64-lightmedia.5-beta.10 \
+            --prerelease \
+            --title "HA3D v0.2.64-lightmedia.5-beta.10" \
+            --notes "Corrige Iluminação da imagem que podia resultar em Spot quase branco. A cor deixa de usar média RGB pura e passa a ponderar pixels cromáticos, reduzindo o peso de branco/cinza; a luminosidade geral continua controlando a intensidade e as transições permanecem suaves. Mantém todos os recursos da beta.9. A estável v0.2.64-lightmedia.4 permanece preservada."
