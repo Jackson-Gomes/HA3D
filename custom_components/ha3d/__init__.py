@@ -79,23 +79,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     else:
         runtime["owns_panel"] = False
 
-    async def _reload_entry() -> None:
-        await hass.config_entries.async_reload(entry.entry_id)
-
-    entry.async_on_unload(entry.add_update_listener(_update_listener))
-    runtime["reload_entry"] = _reload_entry
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Unload HA3D config entry."""
+    """Unload HA3D without touching user models or stored configuration."""
     runtime = hass.data.get(DOMAIN, {})
     if runtime.get("owns_panel") and frontend.async_panel_exists(hass, PANEL_URL_PATH):
         frontend.async_remove_panel(hass, PANEL_URL_PATH)
-    runtime.pop("reload_entry", None)
-    runtime.pop("owns_panel", None)
+    runtime["owns_panel"] = False
     return True
-
-
-async def _update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    await hass.config_entries.async_reload(entry.entry_id)
