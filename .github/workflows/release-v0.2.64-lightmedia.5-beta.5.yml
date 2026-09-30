@@ -1,0 +1,71 @@
+name: Publish HA3D v0.2.64-lightmedia.5-beta.5
+
+on:
+  push:
+    paths:
+      - .github/workflows/release-v0.2.64-lightmedia.5-beta.5.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify media power and X-Ray behavior
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          version='0.2.64-lightmedia.5-beta.5'
+          manifest=json.loads(Path('custom_components/ha3d/manifest.json').read_text())
+          assert manifest['version']==version
+          init=Path('custom_components/ha3d/__init__.py').read_text()
+          assert f'FRONTEND_VERSION = "{version}"' in init
+          entry=Path('custom_components/ha3d/frontend/ha3d-entry.js').read_text()
+          assert 'ha3d-media-panel-power.js?v=media-panel-power-3' in entry
+          assert 'ha3d-light-marker-quick-control.js?v=light-marker-quick-control-3' in entry
+          power=Path('custom_components/ha3d/frontend/ha3d-media-panel-power.js').read_text()
+          for marker in [
+              'material.map = null',
+              'runtime.texture || null',
+              'contains("ha3d-idle-xray")',
+              'runtime.group.visible = runtime.config.enabled !== false && !xray',
+              'renderer.__ha3dMediaPanelPowerFrameGuardV4',
+              'syncVideoPlayback(runtime, powered && !xray)',
+              '__ha3dMediaPanelPowerV4',
+          ]:
+              assert marker in power, marker
+          PY
+          node --check custom_components/ha3d/frontend/ha3d-media-panel-power.js
+          node --check custom_components/ha3d/frontend/ha3d-entry.js
+      - name: Run validation
+        run: |
+          python -m compileall -q custom_components/ha3d
+          npm run check
+          npm test
+          python -m unittest discover -s tests -p 'test_*.py'
+      - name: Tag release
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a v0.2.64-lightmedia.5-beta.5 -m "HA3D v0.2.64-lightmedia.5-beta.5"
+          git push origin v0.2.64-lightmedia.5-beta.5
+      - name: Create prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v0.2.64-lightmedia.5-beta.5 \
+            --prerelease \
+            --title "HA3D v0.2.64-lightmedia.5-beta.5" \
+            --notes "Nova correção da Tela de mídia. Quando a entidade de energia está off/standby/unavailable/unknown, a textura é removida do material e a tela fica preta de forma forçada; ao ligar, a textura atual é restaurada. Uma guarda por frame impede que outra camada faça o vídeo reaparecer. Durante o modo X-Ray, as telas de mídia desaparecem completamente e retornam ao estado correto ao sair. Mantém também a correção beta.4 de toque curto/long-press das lâmpadas. A estável v0.2.64-lightmedia.4 permanece preservada."
