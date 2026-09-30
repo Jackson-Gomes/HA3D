@@ -4,6 +4,7 @@ import asyncio
 import base64
 from dataclasses import dataclass, field
 import ipaddress
+import socket
 import time
 from urllib.parse import urlsplit
 
@@ -31,30 +32,56 @@ class _StreamState:
     error: str | None = None
 
 
-def _private_mjpeg_url(value: str) -> str | None:
-    """Allow only literal private/local HTTP(S) destinations.
-
-    The proxy intentionally refuses arbitrary public hosts so an authenticated
-    browser cannot turn the HA endpoint into a generic server-side request tool.
-    """
+def _is_private_address(value: str) -> bool:
     try:
-        parsed = urlsplit(str(value or "").strip())
+        address = ipaddress.ip_address(value)
+    except ValueError:
+        return False
+    return address.is_private or address.is_loopback or address.is_link_local
+
+
+async def _private_mjpeg_url(value: str) -> str | None:
+    """Allow only private/local HTTP(S) destinations, including validated .local hosts.
+
+    Literal private IPs and localhost are accepted directly. mDNS-style .local
+    names are resolved first and accepted only when every returned address is
+    private, loopback or link-local. Arbitrary public hostnames remain blocked.
+    """
+    raw = str(value or "").strip()
+    try:
+        parsed = urlsplit(raw)
     except ValueError:
         return None
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         return None
     if parsed.username or parsed.password:
         return None
-    host = parsed.hostname
+
+    host = parsed.hostname.rstrip(".").lower()
     if host == "localhost":
-        return value
+        return raw
+    if _is_private_address(host):
+        return raw
+
+    # Permit mDNS/local hostnames such as homeassistant.local only after
+    # resolving them and proving they remain inside the private/local network.
+    if not host.endswith(".local"):
+        return None
+
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
     try:
-        address = ipaddress.ip_address(host)
-    except ValueError:
+        infos = await asyncio.get_running_loop().getaddrinfo(
+            host,
+            port,
+            type=socket.SOCK_STREAM,
+        )
+    except (OSError, socket.gaierror):
         return None
-    if not (address.is_private or address.is_loopback or address.is_link_local):
+
+    addresses = {info[4][0] for info in infos if info and info[4]}
+    if not addresses or not all(_is_private_address(address) for address in addresses):
         return None
-    return value
+    return raw
 
 
 class HA3DMjpegHub:
@@ -157,7 +184,7 @@ class HA3DMjpegFrameView(HomeAssistantView):
         if not panel:
             return self.json({"error": "mjpeg_panel_not_found"}, status=404)
 
-        url = _private_mjpeg_url(panel.get("url", ""))
+        url = await _private_mjpeg_url(panel.get("url", ""))
         if not url:
             return self.json({"error": "mjpeg_url_must_be_private_lan"}, status=400)
 
