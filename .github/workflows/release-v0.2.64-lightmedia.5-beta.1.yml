@@ -1,0 +1,68 @@
+name: Publish HA3D v0.2.64-lightmedia.5-beta.1
+
+on:
+  push:
+    paths:
+      - .github/workflows/release-v0.2.64-lightmedia.5-beta.1.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify light marker quick control
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          version='0.2.64-lightmedia.5-beta.1'
+          manifest=json.loads(Path('custom_components/ha3d/manifest.json').read_text())
+          assert manifest['version']==version
+          init=Path('custom_components/ha3d/__init__.py').read_text()
+          assert f'FRONTEND_VERSION = "{version}"' in init
+          entry=Path('custom_components/ha3d/frontend/ha3d-entry.js').read_text()
+          assert 'ha3d-light-marker-quick-control.js?v=light-marker-quick-control-1' in entry
+          quick=Path('custom_components/ha3d/frontend/ha3d-light-marker-quick-control.js').read_text()
+          for marker in [
+              'startsWith("light.")',
+              'callService("light", "toggle"',
+              '_openNativeMoreInfo?.(entityId)',
+              'HOLD_MS = 550',
+              'stopImmediatePropagation()',
+          ]:
+              assert marker in quick
+          PY
+          node --check custom_components/ha3d/frontend/ha3d-light-marker-quick-control.js
+          node --check custom_components/ha3d/frontend/ha3d-entry.js
+      - name: Run validation
+        run: |
+          python -m compileall -q custom_components/ha3d
+          npm run check
+          npm test
+          python -m unittest discover -s tests -p 'test_*.py'
+      - name: Tag release
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a v0.2.64-lightmedia.5-beta.1 -m "HA3D v0.2.64-lightmedia.5-beta.1"
+          git push origin v0.2.64-lightmedia.5-beta.1
+      - name: Create prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v0.2.64-lightmedia.5-beta.1 \
+            --prerelease \
+            --title "HA3D v0.2.64-lightmedia.5-beta.1" \
+            --notes "Teste isolado sobre a estável v0.2.64-lightmedia.4. Somente ícones de entidades light.* mudam: toque/clique curto alterna a lâmpada via light.toggle; pressionar e segurar por aproximadamente 550 ms abre o more-info nativo do Home Assistant para brilho, cor e demais controles. Arrastar o dedo/cursor cancela o long-press. A estável v0.2.64-lightmedia.4 permanece preservada e inalterada."
