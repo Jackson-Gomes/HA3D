@@ -453,6 +453,17 @@ function installInteractionHooks(panel) {
 
   const activity = (event) => {
     if (panel._ha3dIdleActive) {
+      const visuallyIdle = root.classList.contains("ha3d-idle-xray");
+
+      // Never swallow interaction because of an orphaned idle flag. If the
+      // visual X-Ray state is already gone, restore controls and let this same
+      // pointer event continue to the floor-zone handler.
+      if (!visuallyIdle && !panel._ha3dIdleExitSequence) {
+        stopIdle(panel);
+        markActivity(panel);
+        return;
+      }
+
       event.preventDefault?.();
       event.stopImmediatePropagation?.();
       exitIdleFromUser(panel);
