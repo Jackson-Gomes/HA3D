@@ -77,7 +77,7 @@ function ensureStyle(panel) {
     .h3tvBtn.power{background:color-mix(in srgb,#d63d3d 72%,#24262c)}
     .h3tvControls{display:grid;grid-template-columns:150px 1fr;gap:10px;align-items:stretch}
     .h3tvDpad{display:grid;grid-template-columns:46px 46px 46px;grid-template-rows:46px 46px 46px;gap:4px;justify-content:center;align-items:center;padding:3px}
-    .h3tvDpad .up{grid-column:2;grid-row:1}.h3tvDpad .left{grid-column:1;grid-row:2}.h3tvDpad .right{grid-column:3;grid-row:2}.h3tvDpad .down{grid-column:2;grid-row:3}
+    .h3tvDpad .up{grid-column:2;grid-row:1}.h3tvDpad .left{grid-column:1;grid-row:2}.h3tvDpad .center{grid-column:2;grid-row:2}.h3tvDpad .right{grid-column:3;grid-row:2}.h3tvDpad .down{grid-column:2;grid-row:3}
     .h3tvRound{width:46px;height:46px;min-height:46px;padding:0;border-radius:50%}
     .h3tvQuick{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
     .h3tvMini{min-height:49px;padding:6px 4px;border-radius:11px;background:#262930;border:1px solid rgba(255,255,255,.09);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;font-size:9px;font-weight:700;text-align:center}
@@ -286,6 +286,7 @@ function render(panel, entity, marker) {
   const dpadButtons = [
     ["up", "mdi:chevron-up", "DPAD_UP", "Cima"],
     ["left", "mdi:chevron-left", "DPAD_LEFT", "Esquerda"],
+    ["center", "mdi:circle-outline", "DPAD_CENTER", "Selecionar"],
     ["right", "mdi:chevron-right", "DPAD_RIGHT", "Direita"],
     ["down", "mdi:chevron-down", "DPAD_DOWN", "Baixo"],
   ];
