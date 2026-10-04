@@ -1,0 +1,107 @@
+name: Publish HA3D v0.2.68 LightMedia safe
+
+on:
+  push:
+    paths:
+      - .github/workflows/release-v0.2.68.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Verify LightMedia-safe scope
+        run: |
+          git fetch --tags --force
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          manifest=json.loads(Path('custom_components/ha3d/manifest.json').read_text())
+          assert manifest['version']=='0.2.68'
+
+          init=Path('custom_components/ha3d/__init__.py').read_text()
+          assert 'FRONTEND_VERSION = "0.2.68"' in init
+          for required in [
+              'HA3DMediaPanelsView',
+              'HA3DMediaUploadView',
+              'HA3DMjpegFrameView',
+          ]:
+              assert required in init
+
+          entry=Path('custom_components/ha3d/frontend/ha3d-entry.js').read_text()
+          for required in [
+              'ha3d-media-panels.js',
+              'ha3d-media-upload.js',
+              'ha3d-media-panel-power.js',
+              'ha3d-mjpeg.js',
+              'ha3d-vacuum-binding-menu.js',
+              'ha3d-editor-menu-only.js',
+              'ha3d-custom-binding-icon.js',
+          ]:
+              assert required in entry
+          assert 'ha3d-camera-lens.js' not in entry
+
+          gestures=Path('custom_components/ha3d/frontend/ha3d-interaction-gestures.js').read_text()
+          assert 'geometry never enters editor' in gestures
+
+          scene=Path('custom_components/ha3d/frontend/ha3d-object-scene-menu.js').read_text()
+          assert 'scene_menu_icon' in scene
+          assert 'ha3dObjectSceneIcon' in scene
+
+          binding=Path('custom_components/ha3d/frontend/ha3d-binding-editor-override.js').read_text()
+          assert 'marker_icon' in binding
+          assert 'ha3dMarkerIcon' in binding
+          PY
+
+          for f in             custom_components/ha3d/frontend/ha3d-media-panels.js             custom_components/ha3d/frontend/ha3d-media-upload.js             custom_components/ha3d/frontend/ha3d-media-panel-power.js             custom_components/ha3d/frontend/ha3d-mjpeg.js             custom_components/ha3d/media_panels.py             custom_components/ha3d/media_upload.py             custom_components/ha3d/mjpeg_proxy.py             custom_components/ha3d/frontend/ha3d-robot-trackers.js             custom_components/ha3d/frontend/ha3d-robot-map-overlay.js             custom_components/ha3d/frontend/ha3d-robot-map-hotfix.js             custom_components/ha3d/frontend/ha3d-robot-runtime-fix.js             custom_components/ha3d/frontend/ha3d-robot-motion-continuity.js             custom_components/ha3d/frontend/ha3d-robot-cleaning-pulse.js
+          do
+            git diff --quiet v0.2.64-lightmedia.5-beta.11 -- "$f" || {
+              echo "Protected LightMedia/robot file changed: $f"
+              git diff v0.2.64-lightmedia.5-beta.11 -- "$f"
+              exit 1
+            }
+          done
+
+          node --check custom_components/ha3d/frontend/ha3d-entry.js
+          node --check custom_components/ha3d/frontend/ha3d-marker-filter-bar.js
+          node --check custom_components/ha3d/frontend/ha3d-interaction-gestures.js
+          node --check custom_components/ha3d/frontend/ha3d-object-scene-menu.js
+          node --check custom_components/ha3d/frontend/ha3d-binding-editor-override.js
+          node --check custom_components/ha3d/frontend/ha3d-custom-binding-icon.js
+          node --check custom_components/ha3d/frontend/ha3d-vacuum-binding-menu.js
+          node --check custom_components/ha3d/frontend/ha3d-editor-menu-only.js
+
+      - name: Run full validation
+        run: |
+          python -m compileall -q custom_components/ha3d
+          npm run check
+          npm test
+          python -m unittest discover -s tests -p 'test_*.py'
+
+      - name: Tag release
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a v0.2.68 -m "HA3D v0.2.68"
+          git push origin v0.2.68
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v0.2.68 --title "HA3D v0.2.68" --notes "Reconstruída sobre a v0.2.64-lightmedia.5-beta.11, preservando integralmente LightMedia/MJPEG e o runtime/mapa do Xiaomi H50. Restaura + Tela, Fonte e Liga/desliga com. Corrige filtros inferiores; remove Olho de peixe; impede entrada no editor por clique/long-press na geometria; permite ícone MDI customizado para bindings e menus de cenas; adiciona menu compacto do aspirador somente como UI de um binding vacuum.*, sem alterar rastreamento ou mapa."
