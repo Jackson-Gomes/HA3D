@@ -5,7 +5,6 @@ const IDLE_ENTER_MS = 1800;
 const EXIT_HOLD_MS = 1000;
 const ORBIT_SPEED = 0.000025;
 const WATCHDOG_MS = 1000;
-const CINEMATIC_RESUME_MS = 650;
 
 const Panel = customElements.get("ha3d-panel");
 if (!Panel) throw new Error("HA3D panel was not registered");
@@ -544,14 +543,16 @@ if (!proto.__ha3dXrayIdleV4) {
     const result = originalRestoreCinematicUi?.apply(this, args);
 
     if (
-      this._ha3dResumeIdleAfterCinematic &&
-      this._cinematicEnabled &&
       !this._cinematicActive &&
       !(this._cinematicQueue?.length) &&
       !this._ha3dCinematicPrepActive
     ) {
+      // Cinematic completion is user-visible activity. Do not immediately
+      // re-enter Idle/X-Ray, because its capture listener would swallow floor
+      // view-zone taps. Restart the normal 15 s idle countdown instead.
       this._ha3dResumeIdleAfterCinematic = false;
-      this._ha3dIdleResumeAt = Date.now() + CINEMATIC_RESUME_MS;
+      this._ha3dIdleResumeAt = 0;
+      markActivity(this);
     }
 
     return result;
