@@ -89,8 +89,8 @@ function install(panel) {
   }, true);
 }
 
-if (!proto.__ha3dViewZoneXrayFixV2V2) {
-  proto.__ha3dViewZoneXrayFixV2V2 = true;
+if (!proto.__ha3dViewZoneXrayFixV2) {
+  proto.__ha3dViewZoneXrayFixV2 = true;
 
   const oldConnected = proto.connectedCallback;
   proto.connectedCallback = function (...args) {
