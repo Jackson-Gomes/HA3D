@@ -1,0 +1,75 @@
+name: Publish HA3D v0.2.70 TV remote
+
+on:
+  push:
+    paths:
+      - .github/workflows/release-v0.2.70.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Verify TV menu scope
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          manifest=json.loads(Path('custom_components/ha3d/manifest.json').read_text())
+          assert manifest['version']=='0.2.70'
+          init=Path('custom_components/ha3d/__init__.py').read_text()
+          assert 'FRONTEND_VERSION = "0.2.70"' in init
+          entry=Path('custom_components/ha3d/frontend/ha3d-entry.js').read_text()
+          assert 'ha3d-tv-binding-menu.js?v=tv-binding-menu-1' in entry
+          tv=Path('custom_components/ha3d/frontend/ha3d-tv-binding-menu.js').read_text()
+          for required in [
+              'media_player.sala_de_estar_tv_da_sala',
+              'remote.sala_de_estar_tv_da_sala',
+              'scene.ligar_tv',
+              'text.kindle_tv_texto',
+              'DPAD_UP','DPAD_LEFT','DPAD_CENTER','DPAD_RIGHT','DPAD_DOWN',
+              'HOME','BACK','SETTINGS','SEARCH','MUTE',
+              'VOLUME_UP','VOLUME_DOWN','MEDIA_PLAY_PAUSE'
+          ]:
+              assert required in tv, required
+          PY
+          node --check custom_components/ha3d/frontend/ha3d-tv-binding-menu.js
+          node --check custom_components/ha3d/frontend/ha3d-entry.js
+
+      - name: Verify protected features unchanged
+        run: |
+          git fetch --tags --force
+          for f in             custom_components/ha3d/frontend/ha3d-vacuum-binding-menu.js             custom_components/ha3d/frontend/ha3d-media-panels.js             custom_components/ha3d/frontend/ha3d-media-upload.js             custom_components/ha3d/frontend/ha3d-media-panel-power.js             custom_components/ha3d/frontend/ha3d-mjpeg.js             custom_components/ha3d/frontend/ha3d-robot-trackers.js             custom_components/ha3d/frontend/ha3d-robot-map-overlay.js             custom_components/ha3d/frontend/ha3d-robot-map-hotfix.js             custom_components/ha3d/frontend/ha3d-robot-map-shared-config.js             custom_components/ha3d/frontend/ha3d-robot-runtime-fix.js             custom_components/ha3d/frontend/ha3d-robot-motion-continuity.js             custom_components/ha3d/frontend/ha3d-robot-cleaning-pulse.js
+          do
+            git diff --quiet v0.2.69 -- "$f" || { echo "Protected file changed: $f"; exit 1; }
+          done
+
+      - name: Run validation
+        run: |
+          python -m compileall -q custom_components/ha3d
+          npm run check
+          npm test
+          python -m unittest discover -s tests -p 'test_*.py'
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a v0.2.70 -m "HA3D v0.2.70"
+          git push origin v0.2.70
+          gh release create v0.2.70 --title "HA3D v0.2.70" --notes "Adiciona um controle remoto compacto para bindings de TV media_player.*. Usa os mesmos comandos do dashboard Kindle: direcional, OK, Home, Voltar, Configurações, Busca, volume, mute, Play/Pause e teclado. O botão Power usa sempre scene.ligar_tv, funcionando como o botão físico Tuya para ligar ou desligar. Nenhum módulo de LightMedia, robô, mapa ou menu do robô foi alterado."
