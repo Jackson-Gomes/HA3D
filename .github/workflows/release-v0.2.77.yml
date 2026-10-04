@@ -1,0 +1,89 @@
+name: Publish HA3D v0.2.77 zone input recovery
+
+on:
+  push:
+    paths:
+      - .github/workflows/release-v0.2.77.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Verify zone input recovery
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+
+          manifest=json.loads(Path('custom_components/ha3d/manifest.json').read_text())
+          assert manifest['version']=='0.2.77'
+
+          init=Path('custom_components/ha3d/__init__.py').read_text()
+          assert 'FRONTEND_VERSION = "0.2.77"' in init
+
+          fix=Path('custom_components/ha3d/frontend/ha3d-view-zone-xray-fix.js').read_text()
+          assert 'installRootFallback' in fix
+          assert 'animateZoneView' in fix
+          assert 'activateZone' in fix
+          assert '__ha3dZoneCameraToken' in fix
+          assert '__ha3dZoneCinematicStartedAt' in fix
+          assert 'staleByTime' in fix
+          assert 'event.stopImmediatePropagation()' in fix
+
+          xray=Path('custom_components/ha3d/frontend/ha3d-xray-idle-v4.js').read_text()
+          assert 'const visuallyIdle = root.classList.contains("ha3d-idle-xray")' in xray
+          assert 'stopIdle(panel);' in xray
+          assert 'let this same' in xray
+
+          entry=Path('custom_components/ha3d/frontend/ha3d-entry.js').read_text()
+          assert 'xray-idle-8' in entry
+          assert 'view-zone-xray-fix-3' in entry
+          PY
+          node --check custom_components/ha3d/frontend/ha3d-view-zone-xray-fix.js
+          node --check custom_components/ha3d/frontend/ha3d-xray-idle-v4.js
+          node --check custom_components/ha3d/frontend/ha3d-entry.js
+
+      - name: Verify protected features unchanged
+        run: |
+          git fetch --tags --force
+          for f in             custom_components/ha3d/frontend/ha3d-bottom-view-hub.js             custom_components/ha3d/frontend/ha3d-tv-binding-menu.js             custom_components/ha3d/frontend/ha3d-custom-binding-icon.js             custom_components/ha3d/frontend/ha3d-vacuum-binding-menu.js             custom_components/ha3d/frontend/ha3d-media-panels.js             custom_components/ha3d/frontend/ha3d-media-upload.js             custom_components/ha3d/frontend/ha3d-media-panel-power.js             custom_components/ha3d/frontend/ha3d-mjpeg.js             custom_components/ha3d/frontend/ha3d-robot-trackers.js             custom_components/ha3d/frontend/ha3d-robot-map-overlay.js             custom_components/ha3d/frontend/ha3d-robot-map-hotfix.js             custom_components/ha3d/frontend/ha3d-robot-map-shared-config.js             custom_components/ha3d/frontend/ha3d-robot-runtime-fix.js             custom_components/ha3d/frontend/ha3d-robot-motion-continuity.js             custom_components/ha3d/frontend/ha3d-robot-cleaning-pulse.js             custom_components/ha3d/saved_views.py             custom_components/ha3d/storage.py             custom_components/ha3d/http.py
+          do
+            git diff --quiet v0.2.76 -- "$f" || { echo "Protected file changed: $f"; exit 1; }
+          done
+
+      - name: Verify scope
+        run: |
+          ALLOWED='^(\.github/workflows/release-v0\.2\.77\.yml|custom_components/ha3d/__init__\.py|custom_components/ha3d/manifest\.json|custom_components/ha3d/frontend/ha3d-entry\.js|custom_components/ha3d/frontend/ha3d-view-zone-xray-fix\.js|custom_components/ha3d/frontend/ha3d-xray-idle-v4\.js)$'
+          bad="$(git diff --name-only v0.2.76 | grep -vE "$ALLOWED" || true)"
+          test -z "$bad" || { echo "$bad"; exit 1; }
+
+      - name: Run validation
+        run: |
+          python -m compileall -q custom_components/ha3d
+          npm run check
+          npm test
+          python -m unittest discover -s tests -p 'test_*.py'
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a v0.2.77 -m "HA3D v0.2.77"
+          git push origin v0.2.77
+          gh release create v0.2.77 --title "HA3D v0.2.77" --notes "Reescreve a interação das zonas/retângulos de vistas para não depender de flags globais de câmera que podem ficar presas após o Cinemático. O hit-test agora tem fallback no root antes do canvas/OrbitControls e usa animação própria da zona. Também corrige idle órfão que podia engolir o toque antes do retângulo. Mantém storage compartilhado, TV, LightMedia, robô, mapa e ícones de AC intactos."
