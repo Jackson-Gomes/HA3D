@@ -561,6 +561,12 @@ if (!proto.__ha3dBottomViewHubV2) {
     rebuildZones(this);
   };
 
+  proto._ha3dRebuildViewZones = function () {
+    rebuildZones(this);
+    installCanvas(this);
+    return this._ha3dBottomViewZones;
+  };
+
   const oldRenderCustomViews = proto._renderCustomViews;
   proto._renderCustomViews = function (...args) {
     const result = oldRenderCustomViews?.apply(this, args);
