@@ -1,0 +1,93 @@
+name: Publish HA3D v0.2.67 safe fixes
+
+on:
+  push:
+    paths:
+      - .github/workflows/release-v0.2.67.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Verify safe 0.2.67 scope
+        run: |
+          git fetch --tags --force
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          manifest=json.loads(Path('custom_components/ha3d/manifest.json').read_text())
+          assert manifest['version']=='0.2.67'
+
+          init=Path('custom_components/ha3d/__init__.py').read_text()
+          assert 'FRONTEND_VERSION = "0.2.67"' in init
+
+          entry=Path('custom_components/ha3d/frontend/ha3d-entry.js').read_text()
+          assert 'ha3d-camera-lens.js' not in entry
+          assert 'ha3d-custom-binding-icon.js?v=custom-binding-icon-1' in entry
+          assert 'ha3d-vacuum-binding-menu.js?v=vacuum-binding-menu-1' in entry
+          assert 'ha3d-editor-menu-only.js?v=editor-menu-only-1' in entry
+
+          gestures=Path('custom_components/ha3d/frontend/ha3d-interaction-gestures.js').read_text()
+          assert 'editing is menu-only; do not install geometry long-press editing' in gestures
+
+          binding=Path('custom_components/ha3d/frontend/ha3d-binding-editor-override.js').read_text()
+          assert 'marker_icon' in binding
+          assert 'ha3dMarkerIcon' in binding
+
+          vacuum=Path('custom_components/ha3d/frontend/ha3d-vacuum-binding-menu.js').read_text()
+          assert 'never touches robot tracking' in vacuum
+          assert 'vacuum.*' in vacuum
+          PY
+
+          for f in             custom_components/ha3d/frontend/ha3d-entity-markers.js             custom_components/ha3d/frontend/ha3d-scene-assets.js             custom_components/ha3d/frontend/ha3d-robot-trackers.js             custom_components/ha3d/frontend/ha3d-robot-map-overlay.js             custom_components/ha3d/frontend/ha3d-robot-map-hotfix.js             custom_components/ha3d/frontend/ha3d-robot-runtime-fix.js             custom_components/ha3d/frontend/ha3d-robot-motion-continuity.js             custom_components/ha3d/frontend/ha3d-robot-cleaning-pulse.js
+          do
+            git diff --quiet v0.2.64 -- "$f" || {
+              echo "Protected 0.2.64 file changed: $f"
+              git diff v0.2.64 -- "$f"
+              exit 1
+            }
+          done
+
+          node --check custom_components/ha3d/frontend/ha3d-entry.js
+          node --check custom_components/ha3d/frontend/ha3d-editor-menu-only.js
+          node --check custom_components/ha3d/frontend/ha3d-custom-binding-icon.js
+          node --check custom_components/ha3d/frontend/ha3d-vacuum-binding-menu.js
+          node --check custom_components/ha3d/frontend/ha3d-marker-filter-bar.js
+          node --check custom_components/ha3d/frontend/ha3d-interaction-gestures.js
+          node --check custom_components/ha3d/frontend/ha3d-binding-editor-override.js
+
+      - name: Run full validation
+        run: |
+          python -m compileall -q custom_components/ha3d
+          npm run check
+          npm test
+          python -m unittest discover -s tests -p 'test_*.py'
+
+      - name: Tag release
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a v0.2.67 -m "HA3D v0.2.67"
+          git push origin v0.2.67
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v0.2.67 --title "HA3D v0.2.67" --notes "Reconstruída diretamente sobre a v0.2.64 estável. Preserva byte a byte LightMedia/scene-assets e todo o runtime/mapa/rastreamento do robô. Corrige os filtros inferiores; remove o olho-de-peixe; desativa apenas o gatilho de edição por pressão longa e bloqueia entrada no editor fora do botão Editor; permite ícone MDI customizado por binding; adiciona um menu de controle do aspirador apenas como camada de UI para objetos vinculados a vacuum.*, sem alterar o funcionamento do robô."
