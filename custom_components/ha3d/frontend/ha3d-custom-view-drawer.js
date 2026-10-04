@@ -36,6 +36,7 @@ function applyViews(panel, views) {
   panel._customViews = Array.isArray(views) ? views : [];
   panel._config = { ...(panel._config || {}), saved_views: panel._customViews };
   cacheViews(panel._customViews);
+  panel._ha3dSharedViewsUpdated?.();
 }
 
 async function persistViews(panel, views) {
@@ -61,12 +62,33 @@ async function refreshSharedViews(panel, migrateLocal = false) {
     let result = await panel._hass.callApi("GET", SAVED_VIEWS_API);
     let views = Array.isArray(result?.saved_views) ? result.saved_views : [];
 
-    if (migrateLocal && !result?.initialized) {
-      const local = readLocalViews();
-      if (local.length) {
-        result = await panel._hass.callApi("POST", SAVED_VIEWS_API, { saved_views: local });
-        views = Array.isArray(result?.saved_views) ? result.saved_views : local;
-        panel._setStatus?.(`${views.length} vista(s) migrada(s) para o Home Assistant`);
+    const local = migrateLocal ? readLocalViews() : [];
+
+    if (migrateLocal && !result?.initialized && local.length) {
+      result = await panel._hass.callApi("POST", SAVED_VIEWS_API, { saved_views: local });
+      views = Array.isArray(result?.saved_views) ? result.saved_views : local;
+      panel._setStatus?.(`${views.length} vista(s) migrada(s) para o Home Assistant`);
+    } else if (migrateLocal && !result?.layout_initialized && local.length && views.length) {
+      const localById = new Map(local.map((item) => [String(item?.id), item]));
+      let migrated = false;
+      const merged = views.map((view) => {
+        const cached = localById.get(String(view?.id));
+        if (!cached) return view;
+        const next = { ...view };
+        if (!next.zone && cached.zone) {
+          next.zone = cached.zone;
+          migrated = true;
+        }
+        if (!Object.prototype.hasOwnProperty.call(next, "quick_access") && typeof cached.quick_access === "boolean") {
+          next.quick_access = cached.quick_access;
+          migrated = true;
+        }
+        return next;
+      });
+      if (migrated) {
+        result = await panel._hass.callApi("POST", SAVED_VIEWS_API, { saved_views: merged });
+        views = Array.isArray(result?.saved_views) ? result.saved_views : merged;
+        panel._setStatus?.("Atalhos de vistas migrados para o Home Assistant");
       }
     }
 
