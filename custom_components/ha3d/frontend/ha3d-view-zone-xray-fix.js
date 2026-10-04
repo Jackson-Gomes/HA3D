@@ -15,8 +15,15 @@ function visibleModeBlocksZones(panel) {
   if (root.classList.contains("ha3d-idle-xray")) return true;
 
   if (root.classList.contains("ha3d-cinematic-active")) {
-    if (!panel?._cinematicActive && !panel?._ha3dCinematicPrepActive) {
+    const startedAt = Number(panel?.__ha3dZoneCinematicStartedAt || 0);
+    const staleByTime = startedAt > 0 && performance.now() - startedAt > 10000;
+
+    if ((!panel?._cinematicActive && !panel?._ha3dCinematicPrepActive) || staleByTime) {
+      panel._cinematicActive = false;
+      panel._cameraAnimating = false;
+      if (panel._controls) panel._controls.enabled = true;
       root.classList.remove("ha3d-cinematic-active");
+      panel.__ha3dZoneCinematicStartedAt = 0;
       scheduleRecovery(panel);
       return false;
     }
@@ -262,6 +269,7 @@ if (!proto.__ha3dViewZoneXrayFixV3) {
   const oldRestore = proto._restoreCinematicUi;
   proto._restoreCinematicUi = function (...args) {
     const result = oldRestore?.apply(this, args);
+    this.__ha3dZoneCinematicStartedAt = 0;
     scheduleRecovery(this);
     return result;
   };
@@ -269,6 +277,7 @@ if (!proto.__ha3dViewZoneXrayFixV3) {
   const oldSetFocus = proto._setCinematicMarkerFocus;
   proto._setCinematicMarkerFocus = function (...args) {
     const result = oldSetFocus?.apply(this, args);
+    this.__ha3dZoneCinematicStartedAt = performance.now();
     const root = rootFor(this);
     if (root && !root.__ha3dViewZoneCinematicObserverV3) {
       const observer = new MutationObserver(() => {
