@@ -23,7 +23,8 @@ function configuredIcon(panel, entity, binding) {
       if (!seen.has(object)) {
         seen.add(object);
         for (const name of namesForObject(object)) {
-          const raw = String(advanced?.[name]?.marker_icon || "").trim();
+          const config = advanced?.[name] || {};
+          const raw = String(config.marker_icon || config.actions?.scene_menu_icon || "").trim();
           if (raw) return raw.includes(":") ? raw : `mdi:${raw}`;
         }
       }
