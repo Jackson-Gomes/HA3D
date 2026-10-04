@@ -72,5 +72,5 @@ import "./ha3d-light-marker-quick-control.js?v=light-marker-quick-control-3";
 import "./ha3d-object-scene-menu.js?v=object-scene-menu-3";
 import "./ha3d-custom-binding-icon.js?v=custom-binding-icon-1";
 import "./ha3d-vacuum-binding-menu.js?v=vacuum-binding-menu-1";
-import "./ha3d-tv-binding-menu.js?v=tv-binding-menu-1";
+import "./ha3d-tv-binding-menu.js?v=tv-binding-menu-2";
 import "./ha3d-editor-menu-only.js?v=editor-menu-only-1";
