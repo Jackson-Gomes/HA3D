@@ -12,6 +12,35 @@ function objectKey(object) {
   return String(object?.userData?.ha3dOriginalNodeName || object?.name || "").trim();
 }
 
+function normalizeMarkerIcon(value) {
+  const icon = String(value || "").trim();
+  if (!icon) return undefined;
+  return icon.includes(":") ? icon : `mdi:${icon}`;
+}
+
+function installMarkerIconField(panel, candidate = null) {
+  const body = panel?.shadowRoot?.querySelector("#ha3dEditorBody");
+  if (!body) return;
+
+  let row = body.querySelector("#ha3dMarkerIconRow");
+  if (!row) {
+    row = document.createElement("div");
+    row.id = "ha3dMarkerIconRow";
+    row.className = "ha3dRow";
+    row.innerHTML = `
+      <label for="ha3dMarkerIcon">Ícone do marcador</label>
+      <input id="ha3dMarkerIcon" type="text" placeholder="Ex.: mdi:air-conditioner" autocomplete="off">
+      <span class="ha3dHint">Opcional. Use qualquer ícone MDI; vazio usa o ícone normal do Home Assistant.</span>
+    `;
+    const source = body.querySelector("#ha3dBindingSourceInfo");
+    if (source?.nextSibling) body.insertBefore(row, source.nextSibling);
+    else body.prepend(row);
+  }
+
+  const input = row.querySelector("#ha3dMarkerIcon");
+  if (input) input.value = String(candidate?.config?.marker_icon || "");
+}
+
 function namesForObject(object) {
   const names = [];
   const original = String(object?.userData?.ha3dOriginalNodeName || "").trim();
@@ -79,8 +108,10 @@ function applyCandidateToForm(panel, candidate) {
   const rules = body.querySelector("#ha3dRules");
   const zoomOnly = body.querySelector("#ha3dZoomOnly");
   const area = body.querySelector("#ha3dArea");
+  const markerIcon = body.querySelector("#ha3dMarkerIcon");
 
   if (entityInput) entityInput.value = candidate?.entity || "";
+  if (markerIcon) markerIcon.value = String(config.marker_icon || "");
   if (readings) readings.value = (config.readings || []).map((item) => typeof item === "string" ? item : `${item.entity_id || ""}${item.attribute ? `:${item.attribute}` : ""}`).join("\n");
   if (rules) rules.value = JSON.stringify(config.state_rules || []);
   if (zoomOnly) zoomOnly.checked = Boolean(config.show_only_when_zoomed);
@@ -123,6 +154,7 @@ function installBindingSourceUi(panel) {
       const candidate = candidates.find((item) => item.key === select.value) || candidates[0];
       panel._ha3dEditorBindingContext.active = candidate;
       applyCandidateToForm(panel, candidate);
+      installMarkerIconField(panel, candidate);
     });
     const label = document.createElement("label");
     label.textContent = "Bindings encontrados neste objeto";
@@ -134,6 +166,7 @@ function installBindingSourceUi(panel) {
   }
 
   body.prepend(box);
+  installMarkerIconField(panel, active);
 }
 
 function readEditorConfig(panel, base = {}) {
@@ -148,6 +181,7 @@ function readEditorConfig(panel, base = {}) {
   }
 
   const entityId = body.querySelector("#ha3dEntity")?.value?.trim() || "";
+  const markerIcon = normalizeMarkerIcon(body.querySelector("#ha3dMarkerIcon")?.value);
   const readings = (body.querySelector("#ha3dReadings")?.value || "")
     .split("\n")
     .map((line) => line.trim())
@@ -162,6 +196,7 @@ function readEditorConfig(panel, base = {}) {
     config: {
       ...base,
       entity_id: entityId || undefined,
+      marker_icon: markerIcon,
       readings,
       state_rules: rules,
       show_only_when_zoomed: Boolean(body.querySelector("#ha3dZoomOnly")?.checked),
