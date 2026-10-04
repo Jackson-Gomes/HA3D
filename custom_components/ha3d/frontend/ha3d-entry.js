@@ -60,4 +60,7 @@ import "./ha3d-binding-marker-refresh.js?v=binding-marker-refresh-3";
 import "./ha3d-floating-state-fix.js?v=floating-state-fix-1";
 import "./ha3d-bottom-view-hub.js?v=bottom-view-hub-1";
 import "./ha3d-view-zone-xray-fix.js?v=view-zone-xray-fix-1";
-import "./ha3d-no-empty-overlay.js?v=no-empty-overlay-1";\nimport "./ha3d-custom-binding-icon.js?v=custom-binding-icon-1";\nimport "./ha3d-vacuum-binding-menu.js?v=vacuum-binding-menu-1";\nimport "./ha3d-editor-menu-only.js?v=editor-menu-only-1";
+import "./ha3d-no-empty-overlay.js?v=no-empty-overlay-1";
+import "./ha3d-custom-binding-icon.js?v=custom-binding-icon-1";
+import "./ha3d-vacuum-binding-menu.js?v=vacuum-binding-menu-1";
+import "./ha3d-editor-menu-only.js?v=editor-menu-only-1";
