@@ -25,6 +25,7 @@ from .media_panels import HA3DMediaPanelsView
 from .media_upload import HA3DMediaUploadView
 from .mjpeg_proxy import HA3DMjpegFrameView, HA3DMjpegHub
 from .scene_assets import HA3DSceneAssetUploadView, HA3DSceneAssetsView
+from .saved_views import HA3DSavedViewsView
 from .storage import HA3DStore
 from .virtual_lights import HA3DVirtualLightsView
 
@@ -61,6 +62,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.http.register_view(HA3DFloatingWidgetsView(store))
         hass.http.register_view(HA3DEntityAliasesView(store))
         hass.http.register_view(HA3DMarkerProximityView(store))
+        hass.http.register_view(HA3DSavedViewsView(store))
         runtime["http_registered"] = True
 
     model_path = Path(hass.config.path(MODEL_RELATIVE_PATH))
