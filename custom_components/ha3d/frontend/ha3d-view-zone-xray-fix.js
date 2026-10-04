@@ -3,6 +3,25 @@ if (!Panel) throw new Error("HA3D panel was not registered");
 
 const proto = Panel.prototype;
 
+function recoverZones(panel) {
+  if (!panel?.isConnected) return;
+
+  const root = panel.shadowRoot?.querySelector("#root");
+  if (!panel._cinematicActive && !panel._ha3dCinematicPrepActive) {
+    root?.classList.remove("ha3d-cinematic-active");
+  }
+
+  install(panel);
+  panel._ha3dRebuildViewZones?.();
+}
+
+function scheduleRecovery(panel) {
+  queueMicrotask(() => recoverZones(panel));
+  requestAnimationFrame(() => recoverZones(panel));
+  setTimeout(() => recoverZones(panel), 80);
+  setTimeout(() => recoverZones(panel), 260);
+}
+
 function visuallyBlocked(panel) {
   const root = panel?.shadowRoot?.querySelector("#root");
   if (panel?._editorMode) return true;
@@ -19,8 +38,8 @@ function visuallyBlocked(panel) {
 
 function install(panel) {
   const canvas = panel?._renderer?.domElement;
-  if (!canvas || canvas.__ha3dViewZoneXrayFix) return;
-  canvas.__ha3dViewZoneXrayFix = true;
+  if (!canvas || canvas.__ha3dViewZoneXrayFixV2) return;
+  canvas.__ha3dViewZoneXrayFixV2 = true;
 
   canvas.addEventListener("pointerdown", (event) => {
     if (visuallyBlocked(panel)) return;
@@ -70,8 +89,8 @@ function install(panel) {
   }, true);
 }
 
-if (!proto.__ha3dViewZoneXrayFixV1) {
-  proto.__ha3dViewZoneXrayFixV1 = true;
+if (!proto.__ha3dViewZoneXrayFixV2V2) {
+  proto.__ha3dViewZoneXrayFixV2V2 = true;
 
   const oldConnected = proto.connectedCallback;
   proto.connectedCallback = function (...args) {
@@ -92,7 +111,21 @@ if (!proto.__ha3dViewZoneXrayFixV1) {
   const oldRestore = proto._restoreCinematicUi;
   proto._restoreCinematicUi = function (...args) {
     const result = oldRestore?.apply(this, args);
-    queueMicrotask(() => install(this));
+    scheduleRecovery(this);
+    return result;
+  };
+
+  const oldSetFocus = proto._setCinematicMarkerFocus;
+  proto._setCinematicMarkerFocus = function (...args) {
+    const result = oldSetFocus?.apply(this, args);
+    const root = this.shadowRoot?.querySelector("#root");
+    if (root && !root.__ha3dViewZoneCinematicObserver) {
+      const observer = new MutationObserver(() => {
+        if (!root.classList.contains("ha3d-cinematic-active")) scheduleRecovery(this);
+      });
+      observer.observe(root, { attributes: true, attributeFilter: ["class"] });
+      root.__ha3dViewZoneCinematicObserver = observer;
+    }
     return result;
   };
 }
