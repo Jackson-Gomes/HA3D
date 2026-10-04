@@ -1,12 +1,24 @@
 const CUSTOM_VIEWS_KEY = "ha3d_custom_views_v1";
+const SAVED_VIEWS_API = "ha3d/saved_views";
 
 const Panel = customElements.get("ha3d-panel");
 if (!Panel) throw new Error("HA3D panel was not registered");
 
 const proto = Panel.prototype;
 
-function persistViews(panel) {
-  localStorage.setItem(CUSTOM_VIEWS_KEY, JSON.stringify(panel._customViews || []));
+function readLocalViews() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(CUSTOM_VIEWS_KEY) || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (_error) {
+    return [];
+  }
+}
+
+function cacheViews(views) {
+  try {
+    localStorage.setItem(CUSTOM_VIEWS_KEY, JSON.stringify(Array.isArray(views) ? views : []));
+  } catch (_error) {}
 }
 
 function cleanName(value, fallback) {
@@ -20,22 +32,75 @@ function askViewName(currentName, fallback) {
   return cleanName(result, fallback);
 }
 
-function renameView(panel, id) {
+function applyViews(panel, views) {
+  panel._customViews = Array.isArray(views) ? views : [];
+  panel._config = { ...(panel._config || {}), saved_views: panel._customViews };
+  cacheViews(panel._customViews);
+}
+
+async function persistViews(panel, views) {
+  if (!panel?._hass?.callApi) return false;
+  try {
+    const result = await panel._hass.callApi("POST", SAVED_VIEWS_API, { saved_views: views });
+    applyViews(panel, result?.saved_views || views);
+    renderPanelList(panel);
+    renderDrawer(panel);
+    panel._setStatus?.("Vistas salvas no Home Assistant");
+    return true;
+  } catch (error) {
+    console.error("[HA3D] shared views save", error);
+    panel._setStatus?.(`Erro ao salvar vistas: ${error.message || error}`);
+    return false;
+  }
+}
+
+async function refreshSharedViews(panel, migrateLocal = false) {
+  if (!panel?._hass?.callApi || panel.__ha3dViewsSyncing) return;
+  panel.__ha3dViewsSyncing = true;
+  try {
+    let result = await panel._hass.callApi("GET", SAVED_VIEWS_API);
+    let views = Array.isArray(result?.saved_views) ? result.saved_views : [];
+
+    if (migrateLocal && !result?.initialized) {
+      const local = readLocalViews();
+      if (local.length) {
+        result = await panel._hass.callApi("POST", SAVED_VIEWS_API, { saved_views: local });
+        views = Array.isArray(result?.saved_views) ? result.saved_views : local;
+        panel._setStatus?.(`${views.length} vista(s) migrada(s) para o Home Assistant`);
+      }
+    }
+
+    applyViews(panel, views);
+    renderPanelList(panel);
+    renderDrawer(panel);
+  } catch (error) {
+    console.error("[HA3D] shared views load", error);
+    if (!Array.isArray(panel._customViews) || !panel._customViews.length) {
+      applyViews(panel, readLocalViews());
+    }
+    renderPanelList(panel);
+    renderDrawer(panel);
+  } finally {
+    panel.__ha3dViewsSyncing = false;
+  }
+}
+
+async function renameView(panel, id) {
   const saved = panel._customViews?.find?.((item) => item.id === id);
   if (!saved) return;
 
   const nextName = askViewName(saved.name, saved.name || "Vista personalizada");
-  if (nextName === null) return;
+  if (nextName === null || nextName === saved.name) return;
 
-  saved.name = nextName;
-  persistViews(panel);
-  panel._renderCustomViews?.();
+  const next = (panel._customViews || []).map((item) =>
+    item.id === id ? { ...item, name: nextName } : item
+  );
+  await persistViews(panel, next);
 }
 
-function removeView(panel, id) {
-  panel._customViews = (panel._customViews || []).filter((item) => item.id !== id);
-  persistViews(panel);
-  panel._renderCustomViews?.();
+async function removeView(panel, id) {
+  const next = (panel._customViews || []).filter((item) => item.id !== id);
+  await persistViews(panel, next);
 }
 
 function ensureStyle(panel) {
@@ -126,6 +191,47 @@ function ensureStyle(panel) {
   panel.shadowRoot.appendChild(style);
 }
 
+function renderPanelList(panel) {
+  const host = panel.shadowRoot?.querySelector("#customViews");
+  if (!host) return;
+
+  host.replaceChildren();
+  for (const saved of panel._customViews || []) {
+    const row = document.createElement("div");
+    row.className = "customRow";
+
+    const open = document.createElement("button");
+    open.type = "button";
+    open.textContent = saved.name || "Vista personalizada";
+    open.title = saved.name || "Vista personalizada";
+    open.addEventListener("click", () => panel._animateCameraTo?.(saved.view));
+
+    const rename = document.createElement("button");
+    rename.type = "button";
+    rename.className = "ha3dRenameView";
+    rename.textContent = "✎";
+    rename.title = "Renomear vista";
+    rename.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      void renameView(panel, saved.id);
+    });
+
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.textContent = "×";
+    remove.title = "Excluir vista";
+    remove.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      void removeView(panel, saved.id);
+    });
+
+    row.append(open, rename, remove);
+    host.appendChild(row);
+  }
+}
+
 function renderDrawer(panel) {
   const drawer = panel.shadowRoot?.querySelector("#customViewsDrawer");
   const list = panel.shadowRoot?.querySelector("#customViewsDrawerList");
@@ -163,10 +269,9 @@ function renderDrawer(panel) {
     edit.className = "customDrawerEdit";
     edit.textContent = "✎";
     edit.title = "Renomear vista";
-    edit.setAttribute("aria-label", "Renomear vista");
     edit.addEventListener("click", (event) => {
       event.stopPropagation();
-      renameView(panel, saved.id);
+      void renameView(panel, saved.id);
     });
 
     const remove = document.createElement("button");
@@ -174,10 +279,9 @@ function renderDrawer(panel) {
     remove.className = "customDrawerDelete";
     remove.textContent = "×";
     remove.title = "Excluir vista";
-    remove.setAttribute("aria-label", "Excluir vista");
     remove.addEventListener("click", (event) => {
       event.stopPropagation();
-      removeView(panel, saved.id);
+      void removeView(panel, saved.id);
     });
 
     row.append(open, edit, remove);
@@ -185,31 +289,12 @@ function renderDrawer(panel) {
   }
 }
 
-function decorateExistingCustomRows(panel) {
-  const host = panel.shadowRoot?.querySelector("#customViews");
-  if (!host) return;
-
-  const rows = [...host.querySelectorAll(".customRow")];
-  const views = panel._customViews || [];
-
-  rows.forEach((row, index) => {
-    const saved = views[index];
-    if (!saved || row.querySelector(".ha3dRenameView")) return;
-
-    const rename = document.createElement("button");
-    rename.type = "button";
-    rename.className = "ha3dRenameView";
-    rename.textContent = "✎";
-    rename.title = "Renomear vista";
-    rename.setAttribute("aria-label", "Renomear vista");
-    rename.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      renameView(panel, saved.id);
-    });
-
-    const remove = row.lastElementChild;
-    row.insertBefore(rename, remove || null);
+function bindTopViewsRefresh(panel) {
+  const button = panel.shadowRoot?.querySelector("#viewsButton");
+  if (!button || button.__ha3dSharedViewsRefreshBound) return;
+  button.__ha3dSharedViewsRefreshBound = true;
+  button.addEventListener("click", () => {
+    void refreshSharedViews(panel, false);
   });
 }
 
@@ -219,6 +304,7 @@ function ensureDrawer(panel) {
   if (!root || !bar) return false;
 
   ensureStyle(panel);
+  bindTopViewsRefresh(panel);
 
   let button = panel.shadowRoot.querySelector("#customViewsDrawerButton");
   if (!button) {
@@ -254,7 +340,7 @@ function ensureDrawer(panel) {
       const open = !drawer.classList.contains("open");
       drawer.classList.toggle("open", open);
       button.classList.toggle("active", open);
-      if (open) renderDrawer(panel);
+      if (open) void refreshSharedViews(panel, false);
     });
   }
 
@@ -270,8 +356,8 @@ function ensureDrawer(panel) {
     });
   }
 
+  renderPanelList(panel);
   renderDrawer(panel);
-  decorateExistingCustomRows(panel);
   return true;
 }
 
@@ -288,31 +374,37 @@ function installOnExistingPanels() {
   for (const panel of collectPanels(document)) ensureDrawer(panel);
 }
 
-if (!proto.__ha3dCustomViewDrawerV1) {
-  proto.__ha3dCustomViewDrawerV1 = true;
+if (!proto.__ha3dCustomViewDrawerV2) {
+  proto.__ha3dCustomViewDrawerV2 = true;
 
-  proto._saveCurrentView = function () {
+  proto._saveCurrentView = async function () {
     if (!this._model) return;
 
-    const fallback = `Vista ${this._customViews.length + 1}`;
+    const fallback = `Vista ${(this._customViews || []).length + 1}`;
     const name = askViewName(fallback, fallback);
     if (name === null) return;
 
-    this._customViews.push({
-      id: `${Date.now()}`,
-      name,
-      view: this._captureCameraView(),
-    });
-    persistViews(this);
-    this._renderCustomViews?.();
+    const next = [
+      ...(this._customViews || []),
+      {
+        id: `${Date.now()}`,
+        name,
+        view: this._captureCameraView(),
+      },
+    ];
+    await persistViews(this, next);
   };
 
-  const originalRenderCustomViews = proto._renderCustomViews;
-  proto._renderCustomViews = function (...args) {
-    const result = originalRenderCustomViews?.apply(this, args);
-    decorateExistingCustomRows(this);
+  proto._renderCustomViews = function () {
+    renderPanelList(this);
     ensureDrawer(this);
     renderDrawer(this);
+  };
+
+  const originalLoadConfig = proto._loadConfig;
+  proto._loadConfig = async function (...args) {
+    const result = await originalLoadConfig?.apply(this, args);
+    await refreshSharedViews(this, true);
     return result;
   };
 
