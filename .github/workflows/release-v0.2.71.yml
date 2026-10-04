@@ -1,0 +1,76 @@
+name: Publish HA3D v0.2.71 TV keyboard
+
+on:
+  push:
+    paths:
+      - .github/workflows/release-v0.2.71.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Verify TV keyboard scope
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          manifest=json.loads(Path('custom_components/ha3d/manifest.json').read_text())
+          assert manifest['version']=='0.2.71'
+          init=Path('custom_components/ha3d/__init__.py').read_text()
+          assert 'FRONTEND_VERSION = "0.2.71"' in init
+          entry=Path('custom_components/ha3d/frontend/ha3d-entry.js').read_text()
+          assert 'ha3d-tv-binding-menu.js?v=tv-binding-menu-2' in entry
+          tv=Path('custom_components/ha3d/frontend/ha3d-tv-binding-menu.js').read_text()
+          assert 'width:min(420px' in tv
+          assert 'sendTextChars' in tv
+          assert 'sendDelete' in tv
+          assert 'command = `text:${char}`' not in tv
+          assert 'text:${char}' in tv
+          assert 'DEL' in tv
+          assert 'ENTER' in tv
+          assert 'DPAD_CENTER' not in tv or 'touchpad' not in tv.lower()
+          assert 'Touchpad' not in tv
+          assert 'wireTouchpad' not in tv
+          assert 'h3tvTouchpad' not in tv
+          PY
+          node --check custom_components/ha3d/frontend/ha3d-tv-binding-menu.js
+          node --check custom_components/ha3d/frontend/ha3d-entry.js
+
+      - name: Verify protected features unchanged
+        run: |
+          git fetch --tags --force
+          for f in             custom_components/ha3d/frontend/ha3d-vacuum-binding-menu.js             custom_components/ha3d/frontend/ha3d-media-panels.js             custom_components/ha3d/frontend/ha3d-media-upload.js             custom_components/ha3d/frontend/ha3d-media-panel-power.js             custom_components/ha3d/frontend/ha3d-mjpeg.js             custom_components/ha3d/frontend/ha3d-robot-trackers.js             custom_components/ha3d/frontend/ha3d-robot-map-overlay.js             custom_components/ha3d/frontend/ha3d-robot-map-hotfix.js             custom_components/ha3d/frontend/ha3d-robot-map-shared-config.js             custom_components/ha3d/frontend/ha3d-robot-runtime-fix.js             custom_components/ha3d/frontend/ha3d-robot-motion-continuity.js             custom_components/ha3d/frontend/ha3d-robot-cleaning-pulse.js
+          do
+            git diff --quiet v0.2.70 -- "$f" || { echo "Protected file changed: $f"; exit 1; }
+          done
+
+      - name: Run validation
+        run: |
+          python -m compileall -q custom_components/ha3d
+          npm run check
+          npm test
+          python -m unittest discover -s tests -p 'test_*.py'
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a v0.2.71 -m "HA3D v0.2.71"
+          git push origin v0.2.71
+          gh release create v0.2.71 --title "HA3D v0.2.71" --notes "Refina o menu da TV: largura semelhante ao menu do robô, remove o botão central/OK visual e remove o touchpad. Adiciona teclado ao vivo: cada caractere digitado é enviado imediatamente à TV, com Backspace e Enter individuais. Busca foca automaticamente o campo de teclado. Nenhum módulo de LightMedia, robô, mapa ou menu do robô foi alterado."
