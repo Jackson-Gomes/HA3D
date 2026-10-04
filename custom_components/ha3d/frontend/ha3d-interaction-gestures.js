@@ -184,7 +184,7 @@ function installCardGuard(panel) {
 }
 
 function installLongPress(panel) {
-  const canvas = panel?._renderer?.domElement;
+  // beta12: geometry never enters editor; editing starts only from the Editor button.\n  return;\n  const canvas = panel?._renderer?.domElement;
   if (!canvas || canvas.dataset.ha3dGestureLock === "2") return;
   canvas.dataset.ha3dGestureLock = "2";
 
