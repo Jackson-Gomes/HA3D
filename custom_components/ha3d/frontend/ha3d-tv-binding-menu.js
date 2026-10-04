@@ -81,20 +81,6 @@ function ensureStyle(panel) {
     .h3tvRound{width:46px;height:46px;min-height:46px;padding:0;border-radius:50%}
     .h3tvQuick{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
     .h3tvMini{min-height:49px;padding:6px 4px;border-radius:11px;background:#262930;border:1px solid rgba(255,255,255,.09);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;font-size:9px;font-weight:700;text-align:center}
-    .h3tvTouchpad{
-      position:relative;height:150px;border-radius:15px;overflow:hidden;touch-action:none;user-select:none;
-      background:
-        radial-gradient(circle at center,rgba(255,255,255,.055),transparent 34%),
-        linear-gradient(180deg,#22252b,#1b1d22);
-      border:1px solid rgba(255,255,255,.10);
-      display:flex;align-items:center;justify-content:center;
-    }
-    .h3tvTouchpad::before{
-      content:"";position:absolute;inset:10px;border-radius:12px;border:1px dashed rgba(255,255,255,.09);pointer-events:none
-    }
-    .h3tvTouchpadHint{font-size:11px;opacity:.50;text-align:center;line-height:1.35;pointer-events:none}
-    .h3tvTouchpadHint ha-icon{display:block;margin:0 auto 5px}
-    .h3tvTouchpad.active{background:color-mix(in srgb,var(--primary-color,#03a9f4) 13%,#1d2026)}
     .h3tvKeyboardRow{display:grid;grid-template-columns:1fr auto auto;gap:6px;align-items:center}
     .h3tvInput{width:100%;box-sizing:border-box;border:1px solid rgba(255,255,255,.16);background:#111319;color:var(--primary-text-color,#fff);border-radius:11px;padding:11px;font-size:15px;outline:none}
     .h3tvKeyAction{width:44px;height:42px;min-height:42px;padding:0;border-radius:11px}
@@ -104,7 +90,6 @@ function ensureStyle(panel) {
     @media(max-width:600px){
       #ha3dTvMenu{width:min(400px,calc(100vw - 14px));padding:8px}
       .h3tvControls{grid-template-columns:142px 1fr;gap:8px}
-      .h3tvTouchpad{height:140px}
     }
     @media(max-width:390px){
       .h3tvControls{grid-template-columns:1fr}
@@ -239,52 +224,6 @@ function wireLiveKeyboard(panel, input) {
   };
 }
 
-function wireTouchpad(panel, pad) {
-  let startX = 0;
-  let startY = 0;
-  let activePointer = null;
-
-  const finish = (event) => {
-    if (activePointer === null || event.pointerId !== activePointer) return;
-    const dx = event.clientX - startX;
-    const dy = event.clientY - startY;
-    const distance = Math.hypot(dx, dy);
-
-    pad.classList.remove("active");
-    try { pad.releasePointerCapture(event.pointerId); } catch (_) {}
-    activePointer = null;
-
-    if (distance < 14) {
-      sendRemote(panel, "DPAD_CENTER");
-      return;
-    }
-
-    const horizontal = Math.abs(dx) >= Math.abs(dy);
-    const command = horizontal
-      ? (dx > 0 ? "DPAD_RIGHT" : "DPAD_LEFT")
-      : (dy > 0 ? "DPAD_DOWN" : "DPAD_UP");
-
-    const repeats = Math.max(1, Math.min(5, Math.ceil(distance / 55)));
-    sendRemote(panel, command, { num_repeats: repeats, delay_secs: 0.08 });
-  };
-
-  pad.addEventListener("pointerdown", (event) => {
-    if (activePointer !== null) return;
-    activePointer = event.pointerId;
-    startX = event.clientX;
-    startY = event.clientY;
-    pad.classList.add("active");
-    try { pad.setPointerCapture(event.pointerId); } catch (_) {}
-    event.preventDefault();
-  });
-
-  pad.addEventListener("pointerup", finish);
-  pad.addEventListener("pointercancel", () => {
-    pad.classList.remove("active");
-    activePointer = null;
-  });
-}
-
 function render(panel, entity, marker) {
   const menu = ensureMenu(panel);
   if (!menu) return;
@@ -388,24 +327,6 @@ function render(panel, entity, marker) {
   controls.append(dpad, quick);
   controlsSection.append(controlsTitle, controls);
   menu.appendChild(controlsSection);
-
-  const touchSection = document.createElement("div");
-  touchSection.className = "h3tvSection";
-  const touchTitle = document.createElement("div");
-  touchTitle.className = "h3tvSectionTitle";
-  touchTitle.textContent = "Touchpad";
-  const touchpad = document.createElement("div");
-  touchpad.className = "h3tvTouchpad";
-  const hint = document.createElement("div");
-  hint.className = "h3tvTouchpadHint";
-  hint.appendChild(icon("mdi:gesture-swipe", 25));
-  const hintText = document.createElement("div");
-  hintText.textContent = "Arraste para navegar · toque para selecionar";
-  hint.appendChild(hintText);
-  touchpad.appendChild(hint);
-  wireTouchpad(panel, touchpad);
-  touchSection.append(touchTitle, touchpad);
-  menu.appendChild(touchSection);
 
   const keyboardSection = document.createElement("div");
   keyboardSection.className = "h3tvSection";
