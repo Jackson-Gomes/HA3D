@@ -1,0 +1,95 @@
+name: Publish HA3D v0.2.74 shared view zones
+
+on:
+  push:
+    paths:
+      - .github/workflows/release-v0.2.74.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Verify shared floor shortcuts
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+
+          manifest=json.loads(Path('custom_components/ha3d/manifest.json').read_text())
+          assert manifest['version']=='0.2.74'
+
+          init=Path('custom_components/ha3d/__init__.py').read_text()
+          assert 'FRONTEND_VERSION = "0.2.74"' in init
+
+          store=Path('custom_components/ha3d/storage.py').read_text()
+          assert '"saved_view_layout_initialized": False' in store
+
+          api=Path('custom_components/ha3d/saved_views.py').read_text()
+          assert '{"id", "name", "view", "zone", "quick_access"}' in api
+          assert '"layout_initialized"' in api
+          assert '_sanitize_zone' in api
+
+          drawer=Path('custom_components/ha3d/frontend/ha3d-custom-view-drawer.js').read_text()
+          assert 'layout_initialized' in drawer
+          assert 'cached.zone' in drawer
+          assert 'cached.quick_access' in drawer
+          assert 'panel._ha3dSharedViewsUpdated?.()' in drawer
+
+          hub=Path('custom_components/ha3d/frontend/ha3d-bottom-view-hub.js').read_text()
+          assert 'SAVED_VIEWS_API = "ha3d/saved_views"' in hub
+          assert 'callApi("POST", SAVED_VIEWS_API' in hub
+          assert 'proto._ha3dSharedViewsUpdated' in hub
+
+          entry=Path('custom_components/ha3d/frontend/ha3d-entry.js').read_text()
+          assert 'custom-view-drawer-3' in entry
+          assert 'bottom-view-hub-2' in entry
+          PY
+          node --check custom_components/ha3d/frontend/ha3d-custom-view-drawer.js
+          node --check custom_components/ha3d/frontend/ha3d-bottom-view-hub.js
+          node --check custom_components/ha3d/frontend/ha3d-entry.js
+          python -m py_compile custom_components/ha3d/saved_views.py custom_components/ha3d/storage.py custom_components/ha3d/__init__.py
+
+      - name: Verify protected features unchanged
+        run: |
+          git fetch --tags --force
+          for f in             custom_components/ha3d/frontend/ha3d-tv-binding-menu.js             custom_components/ha3d/frontend/ha3d-custom-binding-icon.js             custom_components/ha3d/http.py             custom_components/ha3d/frontend/ha3d-vacuum-binding-menu.js             custom_components/ha3d/frontend/ha3d-media-panels.js             custom_components/ha3d/frontend/ha3d-media-upload.js             custom_components/ha3d/frontend/ha3d-media-panel-power.js             custom_components/ha3d/frontend/ha3d-mjpeg.js             custom_components/ha3d/frontend/ha3d-robot-trackers.js             custom_components/ha3d/frontend/ha3d-robot-map-overlay.js             custom_components/ha3d/frontend/ha3d-robot-map-hotfix.js             custom_components/ha3d/frontend/ha3d-robot-map-shared-config.js             custom_components/ha3d/frontend/ha3d-robot-runtime-fix.js             custom_components/ha3d/frontend/ha3d-robot-motion-continuity.js             custom_components/ha3d/frontend/ha3d-robot-cleaning-pulse.js
+          do
+            git diff --quiet v0.2.73 -- "$f" || { echo "Protected file changed: $f"; exit 1; }
+          done
+
+      - name: Verify scope
+        run: |
+          ALLOWED='^(.github/workflows/release-v0.2.74.yml|custom_components/ha3d/__init__.py|custom_components/ha3d/manifest.json|custom_components/ha3d/storage.py|custom_components/ha3d/saved_views.py|custom_components/ha3d/frontend/ha3d-entry.js|custom_components/ha3d/frontend/ha3d-custom-view-drawer.js|custom_components/ha3d/frontend/ha3d-bottom-view-hub.js)$'
+          bad="$(git diff --name-only v0.2.73 | grep -vE "$ALLOWED" || true)"
+          test -z "$bad" || { echo "$bad"; exit 1; }
+
+      - name: Run validation
+        run: |
+          python -m compileall -q custom_components/ha3d
+          npm run check
+          npm test
+          python -m unittest discover -s tests -p 'test_*.py'
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a v0.2.74 -m "HA3D v0.2.74"
+          git push origin v0.2.74
+          gh release create v0.2.74 --title "HA3D v0.2.74" --notes "Os retângulos/zonas clicáveis no chão vinculados às vistas agora são salvos junto com as vistas no storage do Home Assistant e compartilhados entre dispositivos. O acesso rápido quick_access também é compartilhado. Na primeira abertura, atalhos antigos ainda presentes no navegador são migrados para as vistas já compartilhadas no HA. Nenhum código de TV, LightMedia, robô, mapa ou ícones de AC foi alterado."
