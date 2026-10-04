@@ -184,6 +184,8 @@ function installCardGuard(panel) {
 }
 
 function installLongPress(panel) {
+  // 0.2.67: editing is menu-only; do not install geometry long-press editing.
+  return;
   const canvas = panel?._renderer?.domElement;
   if (!canvas || canvas.dataset.ha3dGestureLock === "2") return;
   canvas.dataset.ha3dGestureLock = "2";
