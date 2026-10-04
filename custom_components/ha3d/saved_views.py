@@ -26,8 +26,28 @@ def _vec3(value: Any) -> bool:
     return isinstance(value, list) and len(value) == 3 and all(_number(item) for item in value)
 
 
+def _sanitize_zone(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict) or set(value) - {"x", "z", "y", "width", "depth", "show"}:
+        return None
+    for key in ("x", "z", "y", "width", "depth"):
+        if not _number(value.get(key)):
+            return None
+    if float(value["width"]) <= 0 or float(value["depth"]) <= 0:
+        return None
+    if "show" in value and not isinstance(value["show"], bool):
+        return None
+    return {
+        "x": float(value["x"]),
+        "z": float(value["z"]),
+        "y": float(value["y"]),
+        "width": float(value["width"]),
+        "depth": float(value["depth"]),
+        "show": value.get("show", True),
+    }
+
+
 def _sanitize_view(item: Any) -> dict[str, Any] | None:
-    if not isinstance(item, dict) or set(item) - {"id", "name", "view"}:
+    if not isinstance(item, dict) or set(item) - {"id", "name", "view", "zone", "quick_access"}:
         return None
 
     view_id = item.get("id")
@@ -55,7 +75,20 @@ def _sanitize_view(item: Any) -> dict[str, Any] | None:
     if "up" in camera:
         clean_camera["up"] = [float(value) for value in camera["up"]]
 
-    return {"id": view_id, "name": clean_name, "view": clean_camera}
+    result: dict[str, Any] = {"id": view_id, "name": clean_name, "view": clean_camera}
+
+    if "zone" in item:
+        zone = _sanitize_zone(item["zone"])
+        if zone is None:
+            return None
+        result["zone"] = zone
+
+    if "quick_access" in item:
+        if not isinstance(item["quick_access"], bool):
+            return None
+        result["quick_access"] = item["quick_access"]
+
+    return result
 
 
 def _sanitize_views(value: Any) -> list[dict[str, Any]] | None:
@@ -74,7 +107,7 @@ def _sanitize_views(value: Any) -> list[dict[str, Any]] | None:
 
 
 class HA3DSavedViewsView(HomeAssistantView):
-    """Persist camera views once in Home Assistant for all HA3D clients."""
+    """Persist camera views and their floor shortcuts for every HA3D client."""
 
     url = "/api/ha3d/saved_views"
     name = "api:ha3d:saved_views"
@@ -89,6 +122,7 @@ class HA3DSavedViewsView(HomeAssistantView):
         return self.json({
             "saved_views": views,
             "initialized": bool(data.get("saved_views_initialized", False)),
+            "layout_initialized": bool(data.get("saved_view_layout_initialized", False)),
         })
 
     async def post(self, request: web.Request) -> web.Response:
@@ -101,8 +135,17 @@ class HA3DSavedViewsView(HomeAssistantView):
         if views is None:
             return self.json({"error": "invalid_saved_views"}, status=400)
 
+        data = await self._store.async_load()
+        has_layout = any("zone" in view or "quick_access" in view for view in views)
+        layout_initialized = bool(data.get("saved_view_layout_initialized", False)) or has_layout
+
         await self._store.async_update({
             "saved_views": views,
             "saved_views_initialized": True,
+            "saved_view_layout_initialized": layout_initialized,
         })
-        return self.json({"saved_views": views, "initialized": True})
+        return self.json({
+            "saved_views": views,
+            "initialized": True,
+            "layout_initialized": layout_initialized,
+        })
