@@ -48,12 +48,18 @@ def _is_valid_position(value: Any) -> bool:
 
 
 def _is_valid_advanced_binding(value: Any) -> bool:
-    if not isinstance(value, dict) or set(value) - {"entity_id", "anchor", "marker_offset", "readings", "state_rules", "actions", "show_only_when_zoomed"}:
+    if not isinstance(value, dict) or set(value) - {"entity_id", "anchor", "marker_offset", "marker_icon", "readings", "state_rules", "actions", "show_only_when_zoomed"}:
         return False
     entity_id = value.get("entity_id")
     if entity_id is not None and (not isinstance(entity_id, str) or not _ENTITY_ID_RE.fullmatch(entity_id)):
         return False
     if "anchor" in value and (not isinstance(value["anchor"], str) or not value["anchor"] or len(value["anchor"]) > 255):
+        return False
+    if "marker_icon" in value and (
+        not isinstance(value["marker_icon"], str)
+        or len(value["marker_icon"]) > 120
+        or (value["marker_icon"] and ":" not in value["marker_icon"])
+    ):
         return False
     if "marker_offset" in value and (
         not isinstance(value["marker_offset"], list)
