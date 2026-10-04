@@ -5,10 +5,31 @@ if (!Panel) throw new Error("HA3D panel was not registered");
 
 const proto = Panel.prototype;
 const VIEWS_KEY = "ha3d_custom_views_v1";
+const SAVED_VIEWS_API = "ha3d/saved_views";
 const LONG_PRESS_MS = 620;
 
+function cacheViews(panel) {
+  try {
+    localStorage.setItem(VIEWS_KEY, JSON.stringify(panel._customViews || []));
+  } catch (_error) {}
+}
+
 function persist(panel) {
-  localStorage.setItem(VIEWS_KEY, JSON.stringify(panel._customViews || []));
+  cacheViews(panel);
+  if (!panel?._hass?.callApi) return;
+
+  const snapshot = JSON.parse(JSON.stringify(panel._customViews || []));
+  const previous = panel.__ha3dBottomViewPersistQueue || Promise.resolve();
+  panel.__ha3dBottomViewPersistQueue = previous
+    .catch(() => {})
+    .then(async () => {
+      try {
+        await panel._hass.callApi("POST", SAVED_VIEWS_API, { saved_views: snapshot });
+      } catch (error) {
+        console.error("[HA3D] failed to persist shared view zone", error);
+        panel._setStatus?.(`Erro ao salvar atalho de vista: ${error.message || error}`);
+      }
+    });
 }
 
 function getView(panel, id) {
@@ -532,8 +553,13 @@ function ensure(panel) {
   rebuildZones(panel);
 }
 
-if (!proto.__ha3dBottomViewHubV1) {
-  proto.__ha3dBottomViewHubV1 = true;
+if (!proto.__ha3dBottomViewHubV2) {
+  proto.__ha3dBottomViewHubV2 = true;
+
+  proto._ha3dSharedViewsUpdated = function () {
+    renderHub(this);
+    rebuildZones(this);
+  };
 
   const oldRenderCustomViews = proto._renderCustomViews;
   proto._renderCustomViews = function (...args) {
