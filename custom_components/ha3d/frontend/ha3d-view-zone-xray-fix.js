@@ -27,7 +27,14 @@ function visuallyBlocked(panel) {
   if (panel?._editorMode) return true;
   if (panel?._ha3dIdleActive || panel?._ha3dIdleExitSequence || panel?._ha3dCinematicPrepActive) return true;
   if (root?.classList.contains("ha3d-idle-xray")) return true;
-  if (root?.classList.contains("ha3d-cinematic-active")) return true;
+  if (root?.classList.contains("ha3d-cinematic-active")) {
+    if (!panel?._cinematicActive && !panel?._ha3dCinematicPrepActive) {
+      root.classList.remove("ha3d-cinematic-active");
+      scheduleRecovery(panel);
+    } else {
+      return true;
+    }
+  }
 
   // A real camera animation normally disables OrbitControls. If the internal
   // _cameraAnimating flag is stale after X-Ray/Cinematic but controls are back
