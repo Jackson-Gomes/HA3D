@@ -23,6 +23,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "floating_widgets": [],
     "entity_aliases": {},
     "marker_proximity": {},
+    "saved_views": [],
+    "saved_views_initialized": False,
 }
 
 
@@ -44,6 +46,8 @@ class HA3DStore:
             self._data["floating_widgets"] = list(stored.get("floating_widgets", []))
             self._data["entity_aliases"] = dict(stored.get("entity_aliases", {}))
             self._data["marker_proximity"] = dict(stored.get("marker_proximity", {}))
+            self._data["saved_views"] = list(stored.get("saved_views", []))
+            self._data["saved_views_initialized"] = bool(stored.get("saved_views_initialized", False))
         return deepcopy(self._data)
 
     async def async_update(self, changes: dict[str, Any]) -> dict[str, Any]:
