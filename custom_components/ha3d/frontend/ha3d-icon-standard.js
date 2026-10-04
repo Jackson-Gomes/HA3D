@@ -10,6 +10,37 @@ function objectId(entity) {
   return String(entity || "").split(".", 2)[1] || "";
 }
 
+function objectNames(object) {
+  const names = [];
+  const original = String(object?.userData?.ha3dOriginalNodeName || "").trim();
+  const current = String(object?.name || "").trim();
+  if (original) names.push(original);
+  if (current && current !== original) names.push(current);
+  return names;
+}
+
+function configuredMarkerIcon(panel, binding, entity) {
+  const advanced = panel?._config?.advanced_bindings || {};
+  const candidates = [binding?.anchor, ...(panel?._objectsByEntity?.get?.(entity) || [])].filter(Boolean);
+  const seen = new Set();
+
+  for (const candidate of candidates) {
+    let object = candidate;
+    while (object) {
+      if (!seen.has(object)) {
+        seen.add(object);
+        for (const name of objectNames(object)) {
+          const icon = String(advanced?.[name]?.marker_icon || "").trim();
+          if (icon) return icon.includes(":") ? icon : `mdi:${icon}`;
+        }
+      }
+      if (object === panel?._model) break;
+      object = object.parent;
+    }
+  }
+  return "";
+}
+
 function fallbackMdi(entity, stateObj) {
   const domain = String(entity || "").split(".", 1)[0];
   const id = objectId(entity).toLowerCase();
@@ -67,12 +98,27 @@ function styleMarkerIcon(icon) {
   icon.style.setProperty("--mdc-icon-size", "22px");
 }
 
-function renderMarkerIcon(binding, entity, stateObj) {
+function renderMarkerIcon(panel, binding, entity, stateObj) {
   const marker = binding?.marker;
   if (!marker) return;
 
   marker.style.display = "grid";
   marker.style.placeItems = "center";
+
+  const configured = configuredMarkerIcon(panel, binding, entity);
+  if (configured) {
+    let icon = marker.querySelector("ha-icon[data-ha3d-custom-marker-icon]");
+    if (!icon) {
+      marker.replaceChildren();
+      icon = document.createElement("ha-icon");
+      icon.dataset.ha3dCustomMarkerIcon = "";
+      icon.setAttribute("aria-hidden", "true");
+      styleMarkerIcon(icon);
+      marker.appendChild(icon);
+    }
+    icon.setAttribute("icon", configured);
+    return;
+  }
 
   // Prefer Home Assistant's own state-aware icon whenever the entity exists.
   // This preserves custom entity icons and state-specific MDI behavior.
@@ -107,7 +153,7 @@ function renderMarkerIcon(binding, entity, stateObj) {
 function applyMarkerIcons(panel) {
   const states = panel._hass?.states || {};
   for (const [entity, binding] of panel._lightBindings?.entries?.() || []) {
-    renderMarkerIcon(binding, entity, states[entity]);
+    renderMarkerIcon(panel, binding, entity, states[entity]);
   }
 }
 
@@ -218,8 +264,8 @@ function installOnExistingPanels() {
   for (const panel of collectPanels(document)) applyAll(panel);
 }
 
-if (!proto.__ha3dIconStandardV2) {
-  proto.__ha3dIconStandardV2 = true;
+if (!proto.__ha3dIconStandardV3) {
+  proto.__ha3dIconStandardV3 = true;
 
   const originalConnected = proto.connectedCallback;
   proto.connectedCallback = function (...args) {
