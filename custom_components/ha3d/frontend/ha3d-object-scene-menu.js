@@ -22,8 +22,18 @@ function isNormalModelObject(object) {
   );
 }
 
+function sceneMenuConfig(panel, key) {
+  return panel?._config?.advanced_bindings?.[key]?.actions || {};
+}
+
+function sceneMenuIcon(panel, key) {
+  const raw = String(sceneMenuConfig(panel, key)?.scene_menu_icon || "").trim();
+  if (!raw) return "mdi:palette";
+  return raw.includes(":") ? raw : `mdi:${raw}`;
+}
+
 function sceneMenuEntities(panel, key) {
-  const value = panel?._config?.advanced_bindings?.[key]?.actions?.scene_menu;
+  const value = sceneMenuConfig(panel, key)?.scene_menu;
   if (!Array.isArray(value)) return [];
   return value
     .filter((entity) => typeof entity === "string" && entity.startsWith("scene.") && panel?._hass?.states?.[entity])
@@ -201,6 +211,7 @@ function syncObjectSceneMarkers(panel) {
     if (binding) {
       binding.object = object;
       binding.marker.title = `${key} — menu de cenas`;
+      binding.marker.querySelector("ha-icon")?.setAttribute("icon", sceneMenuIcon(panel, key));
       continue;
     }
 
@@ -210,7 +221,7 @@ function syncObjectSceneMarkers(panel) {
     marker.title = `${key} — menu de cenas`;
     marker.dataset.ha3dObjectSceneKey = key;
     const icon = document.createElement("ha-icon");
-    icon.setAttribute("icon", "mdi:palette");
+    icon.setAttribute("icon", sceneMenuIcon(panel, key));
     marker.appendChild(icon);
 
     marker.addEventListener("pointerdown", (event) => {
@@ -284,6 +295,7 @@ function installEditorUi(panel) {
   const key = objectKey(object);
   if (!key) return;
   const selected = new Set(sceneMenuEntities(panel, key));
+  const selectedIcon = sceneMenuIcon(panel, key);
   const scenes = allScenes(panel);
 
   const box = document.createElement("div");
@@ -296,8 +308,24 @@ function installEditorUi(panel) {
 
   const hint = document.createElement("span");
   hint.className = "ha3dHint";
-  hint.textContent = "Opcional. Marque as cenas. Um ícone de paleta aparecerá sobre este objeto no modo normal e abrirá o menu.";
+  hint.textContent = "Opcional. Marque as cenas e escolha o ícone que aparecerá sobre este objeto no modo normal.";
   box.appendChild(hint);
+
+  const iconRow = document.createElement("div");
+  iconRow.className = "ha3dObjectSceneIconRow";
+  const iconLabel = document.createElement("label");
+  iconLabel.textContent = "Ícone do menu";
+  const iconInput = document.createElement("input");
+  iconInput.id = "ha3dObjectSceneIcon";
+  iconInput.type = "text";
+  iconInput.placeholder = "mdi:air-conditioner";
+  iconInput.value = selectedIcon;
+  iconInput.autocomplete = "off";
+  const iconHint = document.createElement("span");
+  iconHint.className = "ha3dHint";
+  iconHint.textContent = "Ex.: mdi:air-conditioner, mdi:snowflake, mdi:fan. Vazio usa mdi:palette.";
+  iconRow.append(iconLabel, iconInput, iconHint);
+  box.appendChild(iconRow);
 
   const checks = document.createElement("div");
   checks.className = "ha3dObjectSceneChecks";
@@ -345,13 +373,23 @@ function readSelectedScenes(panel) {
     .filter((entity) => entity?.startsWith("scene."));
 }
 
-async function persistSceneMenu(panel, key, entities) {
+function readSceneMenuIcon(panel) {
+  const raw = String(panel?.shadowRoot?.querySelector("#ha3dObjectSceneIcon")?.value || "").trim();
+  if (!raw || raw === "mdi:palette") return "";
+  return raw.includes(":") ? raw : `mdi:${raw}`;
+}
+
+async function persistSceneMenu(panel, key, entities, iconValue = "") {
   const advanced = { ...(panel?._config?.advanced_bindings || {}) };
   const base = { ...(advanced[key] || {}) };
   const actions = { ...(base.actions || {}) };
 
   if (entities.length) actions.scene_menu = [...new Set(entities)].slice(0, 40);
   else delete actions.scene_menu;
+
+  const normalizedIcon = String(iconValue || "").trim();
+  if (entities.length && normalizedIcon) actions.scene_menu_icon = normalizedIcon;
+  else delete actions.scene_menu_icon;
 
   if (Object.keys(actions).length) base.actions = actions;
   else delete base.actions;
@@ -439,7 +477,7 @@ if (!proto.__ha3dObjectSceneMenuV2) {
   proto._removeObjectSceneMenu = async function (key = objectKey(editorObject(this))) {
     if (!key) return;
     try {
-      await persistSceneMenu(this, key, []);
+      await persistSceneMenu(this, key, [], "");
       syncObjectSceneMarkers(this);
       this._setStatus?.(`Menu de cenas removido de ${key}`);
       await this._renderEditorForm?.();
