@@ -25,6 +25,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "marker_proximity": {},
     "saved_views": [],
     "saved_views_initialized": False,
+    "saved_view_layout_initialized": False,
 }
 
 
@@ -48,6 +49,7 @@ class HA3DStore:
             self._data["marker_proximity"] = dict(stored.get("marker_proximity", {}))
             self._data["saved_views"] = list(stored.get("saved_views", []))
             self._data["saved_views_initialized"] = bool(stored.get("saved_views_initialized", False))
+            self._data["saved_view_layout_initialized"] = bool(stored.get("saved_view_layout_initialized", False))
         return deepcopy(self._data)
 
     async def async_update(self, changes: dict[str, Any]) -> dict[str, Any]:
