@@ -46,6 +46,7 @@ import "./ha3d-robot-map-shared-config.js?v=robot-map-shared-config-1";
 import "./ha3d-robot-runtime-fix.js?v=robot-runtime-fix-1";
 import "./ha3d-robot-motion-continuity.js?v=robot-motion-continuity-1";
 import "./ha3d-robot-cleaning-pulse.js?v=robot-cleaning-pulse-3";
+import "./ha3d-robot-control-popover.js?v=robot-control-1";
 import "./ha3d-floating-widgets.js?v=floating-widgets-1";
 import "./ha3d-interaction-gestures.js?v=interaction-gestures-3";
 import "./ha3d-object-inspection.js?v=object-inspection-1";
