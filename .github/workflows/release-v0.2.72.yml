@@ -1,0 +1,65 @@
+name: Publish HA3D v0.2.72 TV center hotfix
+
+on:
+  push:
+    paths:
+      - .github/workflows/release-v0.2.72.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Verify center button
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          manifest=json.loads(Path('custom_components/ha3d/manifest.json').read_text())
+          assert manifest['version']=='0.2.72'
+          tv=Path('custom_components/ha3d/frontend/ha3d-tv-binding-menu.js').read_text()
+          assert '["center", "mdi:circle-outline", "DPAD_CENTER", "Selecionar"]' in tv
+          assert '.h3tvDpad .center{grid-column:2;grid-row:2}' in tv
+          assert '"OK"' not in tv
+          entry=Path('custom_components/ha3d/frontend/ha3d-entry.js').read_text()
+          assert 'tv-binding-menu-3' in entry
+          PY
+          node --check custom_components/ha3d/frontend/ha3d-tv-binding-menu.js
+          node --check custom_components/ha3d/frontend/ha3d-entry.js
+
+      - name: Verify only TV hotfix scope changed
+        run: |
+          git fetch --tags --force
+          CHANGED="$(git diff --name-only v0.2.71)"
+          echo "$CHANGED"
+          echo "$CHANGED" | grep -vE '^(custom_components/ha3d/__init__.py|custom_components/ha3d/manifest.json|custom_components/ha3d/frontend/ha3d-entry.js|custom_components/ha3d/frontend/ha3d-tv-binding-menu.js)$' && exit 1 || true
+
+      - name: Validate
+        run: |
+          python -m compileall -q custom_components/ha3d
+          npm run check
+          npm test
+          python -m unittest discover -s tests -p 'test_*.py'
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a v0.2.72 -m "HA3D v0.2.72"
+          git push origin v0.2.72
+          gh release create v0.2.72 --title "HA3D v0.2.72" --notes "Hotfix do controle da TV: restaura o botão central como uma bolinha simples, sem texto OK, mantendo DPAD_CENTER. Nenhuma outra função do HA3D foi alterada."
