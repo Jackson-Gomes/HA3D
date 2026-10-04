@@ -1,0 +1,71 @@
+name: Publish HA3D v0.2.65 controls cleanup
+
+on:
+  push:
+    paths:
+      - .github/workflows/release-v0.2.65.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify 0.2.65 requested changes
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          manifest=json.loads(Path('custom_components/ha3d/manifest.json').read_text())
+          assert manifest['version']=='0.2.65'
+          init=Path('custom_components/ha3d/__init__.py').read_text()
+          assert 'FRONTEND_VERSION = "0.2.65"' in init
+          entry=Path('custom_components/ha3d/frontend/ha3d-entry.js').read_text()
+          assert 'ha3d-robot-control-popover.js?v=robot-control-1' in entry
+          assert 'ha3d-camera-lens.js' not in entry
+          assert 'ha3d-longpress-only.js' not in entry
+          assert 'ha3d-scene-icon.js' not in entry
+          gestures=Path('custom_components/ha3d/frontend/ha3d-interaction-gestures.js').read_text()
+          assert 'setTimeout(() =>' not in gestures
+          assert 'Object editing is entered only through the explicit editor menu/button.' in gestures
+          filters=Path('custom_components/ha3d/frontend/ha3d-marker-filter-bar.js').read_text()
+          assert 'domain !== "light" && !isClimateEntity(entity, state) && !isOpeningEntity(entity, state)' in filters
+          icons=Path('custom_components/ha3d/frontend/ha3d-binding-editor-override.js').read_text()
+          assert 'marker_icon' in icons and 'ha3dMarkerIcon' in icons
+          robot=Path('custom_components/ha3d/frontend/ha3d-robot-control-popover.js').read_text()
+          for marker in ['script.aspirar_comodos_selecionados','script.passar_pano_comodos_selecionados','script.desligar_robo','switch.robo_sala_aspirar']:
+              assert marker in robot
+          PY
+          node --check custom_components/ha3d/frontend/ha3d-marker-filter-bar.js
+          node --check custom_components/ha3d/frontend/ha3d-interaction-gestures.js
+          node --check custom_components/ha3d/frontend/ha3d-binding-editor-override.js
+          node --check custom_components/ha3d/frontend/ha3d-icon-standard.js
+          node --check custom_components/ha3d/frontend/ha3d-robot-control-popover.js
+      - name: Run validation
+        run: |
+          python -m compileall -q custom_components/ha3d
+          npm run check
+          npm test
+          python -m unittest discover -s tests -p 'test_*.py'
+      - name: Tag release
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a v0.2.65 -m "HA3D v0.2.65"
+          git push origin v0.2.65
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v0.2.65 --title "HA3D v0.2.65" --notes "Baseada diretamente na v0.2.64 estável com LightMedia preservado. Corrige filtros inferiores com categorias exclusivas, remove edição por pressão longa, remove olho-de-peixe, permite ícone MDI por binding no editor e adiciona menu compacto do aspirador ancorado ao marcador do robô, usando os mesmos sensores, seletores e scripts do dashboard Kindle."
