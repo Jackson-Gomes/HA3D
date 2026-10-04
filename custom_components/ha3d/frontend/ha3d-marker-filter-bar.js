@@ -62,7 +62,7 @@ function shouldShowEntity(entity, state, mode) {
 
   const { domain } = entityParts(entity);
   if (mode === "lights") return domain === "light";
-  if (mode === "devices") return domain !== "light";
+  if (mode === "devices") return domain !== "light" && !isClimateEntity(entity, state) && !isOpeningEntity(entity, state);
   if (mode === "climate") return isClimateEntity(entity, state);
   if (mode === "openings") return isOpeningEntity(entity, state);
   return true;
@@ -125,7 +125,7 @@ function installFilterBar(panel) {
   if (!root) return false;
 
   let bar = panel.shadowRoot.querySelector("#markerFilterBar");
-  if (bar?.dataset?.ha3dFilterVersion === "5") {
+  if (bar?.dataset?.ha3dFilterVersion === "6") {
     applyMarkerFilter(panel);
     return true;
   }
@@ -134,9 +134,9 @@ function installFilterBar(panel) {
   // earlier filtering rules to the current buttons.
   bar?.remove();
 
-  if (!panel.shadowRoot.querySelector("#ha3dMarkerFilterStyleV5")) {
+  if (!panel.shadowRoot.querySelector("#ha3dMarkerFilterStyleV6")) {
     const style = document.createElement("style");
-    style.id = "ha3dMarkerFilterStyleV5";
+    style.id = "ha3dMarkerFilterStyleV6";
     style.textContent = `
       .lightMarker.ha3d-filter-hidden{display:none!important}
       #markerFilterBar{
@@ -197,7 +197,7 @@ function installFilterBar(panel) {
   bar = document.createElement("div");
   bar.id = "markerFilterBar";
   bar.className = "glass";
-  bar.dataset.ha3dFilterVersion = "5";
+  bar.dataset.ha3dFilterVersion = "6";
   bar.setAttribute("role", "toolbar");
   bar.setAttribute("aria-label", "Filtros de marcadores");
   bar.innerHTML = `
@@ -244,8 +244,8 @@ function installOnExistingPanels() {
   }
 }
 
-if (!proto.__ha3dMarkerFilterBarV5) {
-  proto.__ha3dMarkerFilterBarV5 = true;
+if (!proto.__ha3dMarkerFilterBarV6) {
+  proto.__ha3dMarkerFilterBarV6 = true;
 
   const originalConnectedCallback = proto.connectedCallback;
   proto.connectedCallback = function () {
