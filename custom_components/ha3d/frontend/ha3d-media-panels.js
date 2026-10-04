@@ -364,6 +364,57 @@ async function save(panel, panels, status) {
   panel._setStatus?.(status);
 }
 
+function mediaPanelsSignature(value) {
+  try {
+    return JSON.stringify(Array.isArray(value) ? value : []);
+  } catch (_error) {
+    return "[]";
+  }
+}
+
+async function refreshSharedMediaPanels(panel, force = false) {
+  if (!panel?._hass?.callApi || panel.__ha3dMediaPanelsSyncing) return;
+  if (!force && panel._editorMode) return;
+
+  panel.__ha3dMediaPanelsSyncing = true;
+  try {
+    const result = await panel._hass.callApi("GET", "ha3d/media_panels");
+    const remote = Array.isArray(result?.media_panels) ? result.media_panels : [];
+    const local = panelConfig(panel);
+
+    if (!force && mediaPanelsSignature(remote) === mediaPanelsSignature(local)) return;
+
+    panel._config = {
+      ...(panel._config || {}),
+      media_panels: remote,
+    };
+    rebuild(panel);
+    syncStates(panel);
+  } catch (error) {
+    console.error("[HA3D] media panel sync failed", error);
+  } finally {
+    panel.__ha3dMediaPanelsSyncing = false;
+  }
+}
+
+function installSharedMediaPanelSync(panel) {
+  if (!panel || panel.__ha3dMediaPanelsSyncInstalled) return;
+  panel.__ha3dMediaPanelsSyncInstalled = true;
+
+  panel.__ha3dMediaPanelsSyncTimer = setInterval(() => {
+    if (!panel.isConnected || document.hidden || panel._editorMode) return;
+    void refreshSharedMediaPanels(panel, false);
+  }, 3000);
+
+  const onVisibility = () => {
+    if (!document.hidden && panel.isConnected && !panel._editorMode) {
+      void refreshSharedMediaPanels(panel, false);
+    }
+  };
+  panel.__ha3dMediaPanelsVisibilityHandler = onVisibility;
+  document.addEventListener("visibilitychange", onVisibility);
+}
+
 function pickMediaPanel(panel, event) {
   if (!panel?._editorMode || !panel?._ha3dMediaPanelPickables?.length) return null;
   const rect = panel._renderer.domElement.getBoundingClientRect();
@@ -408,7 +459,32 @@ if (!proto.__ha3dMediaPanelsV1) {
     const result = oldToggleEditor?.apply(this, args);
     setEditorVisibility(this);
     refreshChooser(this);
+    if (!this._editorMode) queueMicrotask(() => void refreshSharedMediaPanels(this, false));
     return result;
+  };
+
+  const oldConnected = proto.connectedCallback;
+  proto.connectedCallback = function (...args) {
+    const result = oldConnected?.apply(this, args);
+    queueMicrotask(() => installSharedMediaPanelSync(this));
+    requestAnimationFrame(() => installSharedMediaPanelSync(this));
+    return result;
+  };
+
+  const oldDisconnected = proto.disconnectedCallback;
+  proto.disconnectedCallback = function (...args) {
+    if (this.__ha3dMediaPanelsSyncTimer) clearInterval(this.__ha3dMediaPanelsSyncTimer);
+    this.__ha3dMediaPanelsSyncTimer = 0;
+    if (this.__ha3dMediaPanelsVisibilityHandler) {
+      document.removeEventListener("visibilitychange", this.__ha3dMediaPanelsVisibilityHandler);
+    }
+    this.__ha3dMediaPanelsVisibilityHandler = null;
+    this.__ha3dMediaPanelsSyncInstalled = false;
+    return oldDisconnected?.apply(this, args);
+  };
+
+  proto._refreshSharedMediaPanels = function (force = false) {
+    return refreshSharedMediaPanels(this, force);
   };
 
   const oldPickObject = proto._pickObject;
