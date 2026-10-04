@@ -465,7 +465,7 @@ if (!proto.__ha3dObjectSceneMenuV2) {
       return;
     }
     try {
-      await persistSceneMenu(this, key, entities);
+      await persistSceneMenu(this, key, entities, readSceneMenuIcon(this));
       syncObjectSceneMarkers(this);
       this._setStatus?.(`Menu de cenas salvo em ${key}`);
       await this._renderEditorForm?.();
